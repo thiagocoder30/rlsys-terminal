@@ -140,7 +140,7 @@ export default function App() {
       
       // Inicialização oficial do SDK
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
       while (attempt < maxRetries) {
         try {
