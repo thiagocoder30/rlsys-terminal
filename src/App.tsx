@@ -138,8 +138,8 @@ export default function App() {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
 
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+            
 
       while (attempt < maxRetries) {
         try {
