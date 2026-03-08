@@ -151,13 +151,77 @@ export default function App() {
           extractedText = result.response.text();
           break;
         } catch (apiErr: any) {
+  // FUNÇÃO BLINDADA E TURBINADA: Leitura Óptica (OCR)
+  const handleOcrUpload = async (file: File) => {
+    if (!sessionId) return;
+    setLoading(true);
+    const startTime = Date.now(); // Cronômetro de performance
+
+    try {
+      // 1. Hyper-Compressão (Foco em Velocidade de Upload)
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (e) => {
+          const img = new Image();
+          img.src = e.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const maxWidth = 500; // Reduzido drasticamente para leveza extrema
+            let width = img.width;
+            let height = img.height;
+            if (width > maxWidth) {
+              height = (maxWidth / width) * height;
+              width = maxWidth;
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            ctx?.drawImage(img, 0, 0, width, height);
+            // Qualidade reduzida para 50% (0.5)
+            resolve(canvas.toDataURL("image/jpeg", 0.5).split(",")[1]);
+          };
+          img.onerror = reject;
+        };
+        reader.onerror = reject;
+      });
+
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      
+      // 2. Configuração "Sniper" (Desliga a criatividade para máxima velocidade)
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-3-flash-preview",
+        generationConfig: {
+          temperature: 0.0,       // Resposta mecânica e imediata
+          maxOutputTokens: 400,   // Bloqueia a IA de gerar textos longos
+          topK: 1,
+          topP: 1
+        }
+      });
+
+      const maxRetries = 2; // Menos insistência para não perder tempo na mesa
+      let attempt = 0;
+      let extractedText = "";
+
+      while (attempt < maxRetries) {
+        try {
+          // 3. Prompt direto em Inglês (Processamento de tokens mais rápido)
+          const result = await model.generateContent([
+            "Extract only the roulette numbers from this image. Return strictly comma-separated digits. Example: 14,24,4. No text, no spaces.",
+            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+          ]);
+          extractedText = result.response.text();
+          break;
+        } catch (apiErr: any) {
           attempt++;
           const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
           const isBusy = errString.includes("503") || errString.includes("high demand") || errString.includes("429");
 
           if (isBusy && attempt < maxRetries) {
-            console.warn(`[OCR] Servidor congestionado. Tentativa ${attempt}/${maxRetries}. Aguardando 4s...`);
-            await new Promise(r => setTimeout(r, 4000));
+            await new Promise(r => setTimeout(r, 1000)); // Espera apenas 1 segundo
           } else {
             throw apiErr;
           }
@@ -182,8 +246,10 @@ export default function App() {
       const resultData = await res.json();
       if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
 
+      const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
+
       if (resultData.count > 0) {
-        alert(`Sucesso Institucional! ${resultData.count} novos giros lidos e injetados.`);
+        alert(`⚡ Extração Turbo: ${resultData.count} giros em ${timeTaken} segundos!`);
       } else {
         alert("Nenhum giro novo detectado em relação ao histórico atual.");
       }
@@ -191,11 +257,11 @@ export default function App() {
       if (typeof fetchData === 'function') fetchData();
 
     } catch (err: any) {
-      console.error("Erro no OCR:", err);
+      console.error("Erro no OCR Turbo:", err);
       const errString = String(err.message || JSON.stringify(err)).toLowerCase();
       
-      if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
-        alert("⚠️ A rede mundial de IA está congestionada agora. O sistema tentou 4 vezes, mas o Google não liberou a passagem. Aguarde 1 minuto e clique novamente.");
+      if (errString.includes("503") || errString.includes("high demand")) {
+        alert("⚠️ Rede congestionada. Tente novamente.");
       } else {
         alert("Erro ao processar: " + (err.message || "Falha desconhecida."));
       }
@@ -203,6 +269,7 @@ export default function App() {
       setLoading(false);
     }
   };
+            
 
   if (error) {
     const isUnreachable = error.includes("BANCO INACESSÍVEL") || error.includes("P1001");
