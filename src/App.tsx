@@ -6,7 +6,7 @@ import { SpinTimeline } from "./components/SpinTimeline";
 import { ManualEntryInput } from "./components/ManualEntryInput";
 import { OcrButton } from "./components/OcrButton";
 import { motion } from "motion/react";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -134,32 +134,23 @@ export default function App() {
       let attempt = 0;
       let extractedText = "";
 
-      // Usando a chave de ambiente obrigatória para este runtime
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Chave da API não configurada (GEMINI_API_KEY)");
+      // Lendo a chave no formato correto do Vite
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Chave da API não configurada no .env (VITE_GEMINI_API_KEY)");
       
+      // Inicialização oficial do SDK
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
       while (attempt < maxRetries) {
         try {
-          const ai = new GoogleGenAI({ apiKey });
-          // Usamos gemini-3-flash-preview para máxima eficiência e conformidade
-          const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: {
-              parts: [
-                {
-                  text: "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
-                },
-                {
-                  inlineData: {
-                    data: base64Image,
-                    mimeType: "image/jpeg",
-                  },
-                },
-              ],
-            },
-          });
+          const result = await model.generateContent([
+            "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
+            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+          ]);
           
-          extractedText = response.text || "";
+          // Extração correta do texto da API oficial
+          extractedText = result.response.text();
           break; // Sucesso, sai do loop
         } catch (apiErr: any) {
           attempt++;
@@ -168,6 +159,7 @@ export default function App() {
           
           if (isRateLimit && attempt < maxRetries) {
             console.warn(`[OCR] Gemini sob alta demanda (Tentativa ${attempt}/${maxRetries}). Aguardando 2s...`);
+            // Sleep de 2 segundos antes de tentar de novo
             await new Promise(r => setTimeout(r, 2000));
           } else {
             throw apiErr; // Falha crítica ou exauriu tentativas
@@ -185,8 +177,8 @@ export default function App() {
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado na imagem.");
 
-      // Sincronização com o Backend (usando caminho relativo para garantir compatibilidade com o proxy)
-      const res = await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
+      // Enviando para a porta 3000 garantindo que acha o Backend
+      const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ numbers }),
@@ -202,6 +194,7 @@ export default function App() {
         alert(resultData.message || "Nenhum novo giro detectado na imagem.");
       }
       
+      // Atualiza a UI se a função existir
       if (typeof fetchData === 'function') fetchData();
       
     } catch (err: any) {
