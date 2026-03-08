@@ -15,7 +15,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
 
-  // Inicializar Sessão
   const initSession = async (retries = 3) => {
     setError(null);
     try {
@@ -38,7 +37,6 @@ export default function App() {
       
       setSessionId(json.id);
     } catch (err: any) {
-      console.error(`Erro ao iniciar sessão:`, err);
       if (retries > 0 && err.message === "Failed to fetch") {
         setTimeout(() => initSession(retries - 1), 2000);
       } else {
@@ -71,7 +69,6 @@ export default function App() {
     }
   }, [sessionId, fetchData, error]);
 
-  // Entrada Manual
   const handleNumberClick = async (number: number) => {
     if (!sessionId) return;
     setLoading(true);
@@ -90,14 +87,13 @@ export default function App() {
     }
   };
 
-  // OCR Híbrido: Alta Resolução (1200px) + Extração via Regex
   const handleOcrUpload = async (file: File) => {
     if (!sessionId) return;
     setLoading(true);
     const startTime = Date.now();
 
     try {
-      // 1. Otimização de Imagem (1200px + High Quality Smoothing)
+      // 1. Otimização de Imagem (800px para upload mais rápido)
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -106,7 +102,7 @@ export default function App() {
           img.src = e.target?.result as string;
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const maxDim = 1200; 
+            const maxDim = 800; // Reduzido de 1200 para 800 (corta o tempo de upload pela metade)
             let width = img.width;
             let height = img.height;
             
@@ -142,8 +138,6 @@ export default function App() {
       if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      
-      // 2. Modelo ATUALIZADO e configurado para precisão
       const model = genAI.getGenerativeModel({ 
         model: "gemini-3-flash-preview",
         generationConfig: { temperature: 0.0, maxOutputTokens: 1000 }
@@ -155,9 +149,9 @@ export default function App() {
 
       while (attempt <= maxRetries) {
         try {
-          // 3. Prompt Autoritário: Força a leitura da grade inteira
+          // 2. Prompt direcionado APENAS para a grade
           const result = await model.generateContent([
-            "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Do not stop early. Read left-to-right, top-to-bottom. Output ONLY numbers separated by commas. No text.",
+            "Extract ONLY the numbers from the large rectangular grid. IGNORE the top horizontal highlighted bar completely. Read the grid row by row, from left-to-right, top-to-bottom. Output ONLY numbers separated by commas. No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
@@ -176,16 +170,17 @@ export default function App() {
 
       if (!extractedText) throw new Error("A IA não retornou texto algum.");
 
-      // 4. Extração Inteligente (Regex) - Filtra apenas números de 0 a 36
-      const numbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || [])
-        .map(n => parseInt(n))
-        .reverse(); // Inverte para processar do mais antigo ao mais novo
+      // 3. Extração e ORDENAÇÃO CORRETA (Sem o reverse)
+      // Ler a imagem da esquerda p/ direita, cima p/ baixo já nos dá a ordem: Mais Velho -> Mais Novo
+      const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+
+      // Removemos o .reverse() para manter a integridade cronológica da matriz
+      const numbers = rawNumbers; 
 
       if (numbers.length === 0) {
         throw new Error("Nenhum número válido (0-36) detectado na imagem.");
       }
 
-      // 5. Sincronização Absoluta com o Backend
       const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,10 +192,11 @@ export default function App() {
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
+      // 4. Feedback detalhado separando o que foi lido do que era novo
       if (resultData.count > 0) {
-        alert(`⚡ Extração Total (Regex): ${resultData.count} giros injetados em ${timeTaken} segundos!`);
+        alert(`⚡ Leitura: ${numbers.length} números.\nInjetados: ${resultData.count} novos giros em ${timeTaken}s!`);
       } else {
-        alert("Nenhum giro novo detectado em relação ao histórico atual.");
+        alert(`Leitura: ${numbers.length} números.\nNenhum giro novo (histórico já atualizado).`);
       }
       
       if (typeof fetchData === 'function') fetchData();
