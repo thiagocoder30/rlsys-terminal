@@ -99,7 +99,7 @@ export default function App() {
   const handleOcrUpload = async (file: File) => {
     if (!sessionId) return;
     setLoading(true);
-    
+
     try {
       // 1. Compressão Client-Side (Performance Institucional)
       const base64Image = await new Promise<string>((resolve, reject) => {
@@ -132,31 +132,39 @@ export default function App() {
       // 2. Chamada Resiliente ao Gemini (Retry Logic)
       const maxRetries = 3;
       let attempt = 0;
-      let response = null;
+      let extractedText = "";
 
+      // Usando a chave de ambiente obrigatória para este runtime
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Chave da API não configurada (GEMINI_API_KEY)");
+      
       while (attempt < maxRetries) {
         try {
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-          // Nota: Usamos gemini-3-flash-preview (Versão otimizada e permitida do Flash)
-          response = await ai.models.generateContent({
+          const ai = new GoogleGenAI({ apiKey });
+          // Usamos gemini-3-flash-preview para máxima eficiência e conformidade
+          const response = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: {
               parts: [
-                { inlineData: { data: base64Image, mimeType: "image/jpeg" } },
                 {
-                  text: `Extraia todos os números do histórico de giros desta imagem de estatísticas de roleta. 
-                  Capture os números da barra horizontal superior (destaque) e de toda a grade retangular abaixo. 
-                  Retorne APENAS os números separados por vírgula, seguindo a ordem visual: primeiro os da barra (da esquerda para a direita) e depois os da grade (linha por linha, de cima para baixo). 
-                  Exemplo: 14,24,4,4,21,6... 
-                  Responda EXCLUSIVAMENTE com a string de números.`,
+                  text: "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
+                },
+                {
+                  inlineData: {
+                    data: base64Image,
+                    mimeType: "image/jpeg",
+                  },
                 },
               ],
             },
           });
+          
+          extractedText = response.text || "";
           break; // Sucesso, sai do loop
         } catch (apiErr: any) {
           attempt++;
-          const isRateLimit = apiErr.message?.includes("503") || apiErr.message?.includes("429") || apiErr.message?.includes("High Demand");
+          const errMsg = apiErr.message || "";
+          const isRateLimit = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("High Demand") || errMsg.includes("quota");
           
           if (isRateLimit && attempt < maxRetries) {
             console.warn(`[OCR] Gemini sob alta demanda (Tentativa ${attempt}/${maxRetries}). Aguardando 2s...`);
@@ -167,40 +175,44 @@ export default function App() {
         }
       }
 
-      if (!response || !response.text) throw new Error("A IA não conseguiu ler os números.");
+      if (!extractedText) throw new Error("A IA não conseguiu ler os números.");
 
       // 3. Parse e Sincronização
-      const numbers = response.text.split(",")
+      const numbers = extractedText.split(",")
         .map(n => parseInt(n.trim()))
         .filter(n => !isNaN(n) && n >= 0 && n <= 36)
         .reverse();
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado na imagem.");
 
+      // Sincronização com o Backend (usando caminho relativo para garantir compatibilidade com o proxy)
       const res = await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ numbers }),
       });
       
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Falha na sincronização");
+      const resultData = await res.json();
+      if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
       
-      if (result.count > 0) {
-        console.log(`[RL.sys] Sucesso: ${result.count} novos giros sincronizados.`);
+      if (resultData.count > 0) {
+        console.log(`[RL.sys] Sucesso: ${resultData.count} novos giros sincronizados.`);
+        alert(`Sucesso! ${resultData.count} giros lidos e injetados.`);
       } else {
-        alert(result.message || "Nenhum novo giro detectado.");
+        alert(resultData.message || "Nenhum novo giro detectado na imagem.");
       }
       
-      fetchData();
+      if (typeof fetchData === 'function') fetchData();
+      
     } catch (err: any) {
       console.error("Erro no OCR Institucional:", err);
-      const isHighDemand = err.message?.includes("503") || err.message?.includes("High Demand");
+      const errMsg = err.message || "";
+      const isHighDemand = errMsg.includes("503") || errMsg.includes("High Demand");
       
       if (isHighDemand) {
         alert("A rede de IA está congestionada no momento. Aguarde alguns segundos e clique novamente.");
       } else {
-        alert(err.message || "Erro ao processar imagem institucional.");
+        alert(errMsg || "Erro ao processar imagem institucional.");
       }
     } finally {
       setLoading(false);
