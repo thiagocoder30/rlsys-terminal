@@ -1,5 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config(); // Força a leitura do .env imediatamente
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";

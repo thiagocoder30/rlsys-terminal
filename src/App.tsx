@@ -102,7 +102,6 @@ export default function App() {
     
     try {
       // 1. Compressão Client-Side (Performance Institucional)
-      // Reduz imagens pesadas para 800px JPEG 70% antes do upload
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -114,18 +113,14 @@ export default function App() {
             const maxWidth = 800;
             let width = img.width;
             let height = img.height;
-
             if (width > maxWidth) {
               height = (maxWidth / width) * height;
               width = maxWidth;
             }
-
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext("2d");
             ctx?.drawImage(img, 0, 0, width, height);
-
-            // Exporta como JPEG com 70% de qualidade (Equilíbrio perfeito entre peso e leitura)
             const compressedBase64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
             resolve(compressedBase64);
           };
@@ -134,45 +129,54 @@ export default function App() {
         reader.onerror = reject;
       });
 
-      // 2. Chamada Otimizada ao Gemini (Latência Mínima)
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: base64Image,
-                mimeType: "image/jpeg",
-              },
+      // 2. Chamada Resiliente ao Gemini (Retry Logic)
+      const maxRetries = 3;
+      let attempt = 0;
+      let response = null;
+
+      while (attempt < maxRetries) {
+        try {
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          // Nota: Usamos gemini-3-flash-preview (Versão otimizada e permitida do Flash)
+          response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: {
+              parts: [
+                { inlineData: { data: base64Image, mimeType: "image/jpeg" } },
+                {
+                  text: `Extraia todos os números do histórico de giros desta imagem de estatísticas de roleta. 
+                  Capture os números da barra horizontal superior (destaque) e de toda a grade retangular abaixo. 
+                  Retorne APENAS os números separados por vírgula, seguindo a ordem visual: primeiro os da barra (da esquerda para a direita) e depois os da grade (linha por linha, de cima para baixo). 
+                  Exemplo: 14,24,4,4,21,6... 
+                  Responda EXCLUSIVAMENTE com a string de números.`,
+                },
+              ],
             },
-            {
-              text: `Extraia todos os números do histórico de giros desta imagem de estatísticas de roleta. 
-              Capture os números da barra horizontal superior (destaque) e de toda a grade retangular abaixo. 
-              Retorne APENAS os números separados por vírgula, seguindo a ordem visual: primeiro os da barra (da esquerda para a direita) e depois os da grade (linha por linha, de cima para baixo). 
-              Exemplo: 14,24,4,4,21,6... 
-              Responda EXCLUSIVAMENTE com a string de números.`,
-            },
-          ],
-        },
-      });
-
-      const text = response.text;
-      if (!text) throw new Error("A IA não conseguiu ler os números.");
-
-      // 3. Parse Ultra-Rápido e Inversão Cronológica
-      // A imagem mostra o MAIS RECENTE no topo-esquerda (barra vermelha).
-      // O backend precisa do MAIS ANTIGO primeiro para sincronizar corretamente.
-      const numbers = text.split(",")
-        .map(n => parseInt(n.trim()))
-        .filter(n => !isNaN(n) && n >= 0 && n <= 36)
-        .reverse(); // Inverte para [Antigo -> Novo]
-
-      if (numbers.length === 0) {
-        throw new Error("Nenhum número detectado na imagem.");
+          });
+          break; // Sucesso, sai do loop
+        } catch (apiErr: any) {
+          attempt++;
+          const isRateLimit = apiErr.message?.includes("503") || apiErr.message?.includes("429") || apiErr.message?.includes("High Demand");
+          
+          if (isRateLimit && attempt < maxRetries) {
+            console.warn(`[OCR] Gemini sob alta demanda (Tentativa ${attempt}/${maxRetries}). Aguardando 2s...`);
+            await new Promise(r => setTimeout(r, 2000));
+          } else {
+            throw apiErr; // Falha crítica ou exauriu tentativas
+          }
+        }
       }
 
-      // 4. Sincronização com o Backend
+      if (!response || !response.text) throw new Error("A IA não conseguiu ler os números.");
+
+      // 3. Parse e Sincronização
+      const numbers = response.text.split(",")
+        .map(n => parseInt(n.trim()))
+        .filter(n => !isNaN(n) && n >= 0 && n <= 36)
+        .reverse();
+
+      if (numbers.length === 0) throw new Error("Nenhum número detectado na imagem.");
+
       const res = await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +195,13 @@ export default function App() {
       fetchData();
     } catch (err: any) {
       console.error("Erro no OCR Institucional:", err);
-      alert(err.message || "Erro ao processar imagem institucional.");
+      const isHighDemand = err.message?.includes("503") || err.message?.includes("High Demand");
+      
+      if (isHighDemand) {
+        alert("A rede de IA está congestionada no momento. Aguarde alguns segundos e clique novamente.");
+      } else {
+        alert(err.message || "Erro ao processar imagem institucional.");
+      }
     } finally {
       setLoading(false);
     }

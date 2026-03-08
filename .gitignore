@@ -1,50 +1,8 @@
-# ==========================================
-# SEGURANÇA MÁXIMA (CRÍTICO)
-# ==========================================
-# Nunca envie suas chaves de API ou senhas de banco de dados
-.env
-.env.*
-!.env.example
-
-# ==========================================
-# DEPENDÊNCIAS (Node.js)
-# ==========================================
-# O Git não deve rastrear pacotes pesados. O servidor 
-# baixa isso automaticamente com 'npm install'
 node_modules/
-
-# ==========================================
-# BUILDS E COMPILADOS (Vite / TypeScript)
-# ==========================================
-dist/
 build/
-out/
-.vite/
-
-# ==========================================
-# LOGS E TELEMETRIA
-# ==========================================
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-rl-sys-audit.json
+dist/
 coverage/
-
-# ==========================================
-# ARQUIVOS DO SISTEMA E EDITORES (Termux/Vim)
-# ==========================================
-# O Vim gera arquivos temporários que não devem ir para a nuvem
-*.swp
-*.swo
-*~
-.vscode/
 .DS_Store
-
-# ==========================================
-# BANCOS DE DADOS LOCAIS (Prevenção)
-# ==========================================
-*.db
-*.db-journal
-*.sqlite
-*.sqlite3
-
+*.log
+.env*
+!.env.example
