@@ -90,14 +90,15 @@ export default function App() {
     }
   };
 
-  // OCR Modo Turbo Institucional
+  // OCR Modo Turbo de Alta Precisão
   const handleOcrUpload = async (file: File) => {
     if (!sessionId) return;
     setLoading(true);
     const startTime = Date.now();
 
     try {
-      // 1. Hyper-Compressão (500px, 50% qualidade)
+      // 1. Compressão de Precisão (1000px, 80% qualidade)
+      // Mantém a velocidade, mas garante nitidez na grade de 100 giros
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -106,7 +107,7 @@ export default function App() {
           img.src = e.target?.result as string;
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const maxWidth = 500;
+            const maxWidth = 1000;
             let width = img.width;
             let height = img.height;
             if (width > maxWidth) {
@@ -117,7 +118,7 @@ export default function App() {
             canvas.height = height;
             const ctx = canvas.getContext("2d");
             ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL("image/jpeg", 0.5).split(",")[1]);
+            resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
           };
           img.onerror = reject;
         };
@@ -129,10 +130,10 @@ export default function App() {
 
       const genAI = new GoogleGenerativeAI(apiKey);
       
-      // 2. Modelo estrito e criatividade zerada para velocidade máxima
+      // 2. Aumento de tokens para garantir que caibam todos os números
       const model = genAI.getGenerativeModel({ 
         model: "gemini-3-flash-preview",
-        generationConfig: { temperature: 0.0, maxOutputTokens: 400 }
+        generationConfig: { temperature: 0.0, maxOutputTokens: 1000 }
       });
 
       const maxRetries = 2;
@@ -141,9 +142,9 @@ export default function App() {
 
       while (attempt < maxRetries) {
         try {
-          // 3. Prompt em inglês para processamento de tokens ultrarrápido
+          // 3. Prompt Autoritário: Obriga a leitura da grade inteira
           const result = await model.generateContent([
-            "Extract only the roulette numbers from this image. Return strictly comma-separated digits. Example: 14,24,4. No text, no spaces.",
+            "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Do not stop early. Read left-to-right, top-to-bottom. Return strictly comma-separated digits (e.g., 30,0,21,6,35,5,5,7,20...). No text, no spaces, no line breaks.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
@@ -180,7 +181,7 @@ export default function App() {
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
       if (resultData.count > 0) {
-        alert(`⚡ Extração Turbo: ${resultData.count} giros injetados em ${timeTaken} segundos!`);
+        alert(`⚡ Extração Total: ${resultData.count} giros injetados em ${timeTaken} segundos!`);
       } else {
         alert("Nenhum giro novo detectado em relação ao histórico atual.");
       }
@@ -193,7 +194,6 @@ export default function App() {
       if (errString.includes("503") || errString.includes("high demand")) {
         alert("⚠️ Rede congestionada. Tente novamente em alguns segundos.");
       } else {
-        // Alerta detalhado para não ficarmos cegos em caso de falha
         alert("Erro ao processar a imagem: " + (err.message || "Falha desconhecida."));
       }
     } finally {
@@ -256,4 +256,4 @@ export default function App() {
     </div>
   );
   }
-                                                                                
+        
