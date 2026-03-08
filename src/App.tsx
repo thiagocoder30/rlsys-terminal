@@ -90,15 +90,14 @@ export default function App() {
     }
   };
 
-  // OCR Modo Turbo de Alta Precisão
+  // OCR Híbrido: Alta Resolução (1200px) + Extração via Regex
   const handleOcrUpload = async (file: File) => {
     if (!sessionId) return;
     setLoading(true);
     const startTime = Date.now();
 
     try {
-      // 1. Compressão de Precisão (1000px, 80% qualidade)
-      // Mantém a velocidade, mas garante nitidez na grade de 100 giros
+      // 1. Otimização de Imagem (1200px + High Quality Smoothing)
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -107,18 +106,32 @@ export default function App() {
           img.src = e.target?.result as string;
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const maxWidth = 1000;
+            const maxDim = 1200; 
             let width = img.width;
             let height = img.height;
-            if (width > maxWidth) {
-              height = (maxWidth / width) * height;
-              width = maxWidth;
+            
+            if (width > height) {
+              if (width > maxDim) {
+                height *= maxDim / width;
+                width = maxDim;
+              }
+            } else {
+              if (height > maxDim) {
+                width *= maxDim / height;
+                height = maxDim;
+              }
             }
+            
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext("2d");
-            ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+            if (ctx) {
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img, 0, 0, width, height);
+            }
+            const compressed = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+            resolve(compressed);
           };
           img.onerror = reject;
         };
@@ -130,7 +143,7 @@ export default function App() {
 
       const genAI = new GoogleGenerativeAI(apiKey);
       
-      // 2. Aumento de tokens para garantir que caibam todos os números
+      // 2. Modelo ATUALIZADO e configurado para precisão
       const model = genAI.getGenerativeModel({ 
         model: "gemini-3-flash-preview",
         generationConfig: { temperature: 0.0, maxOutputTokens: 1000 }
@@ -140,54 +153,58 @@ export default function App() {
       let attempt = 0;
       let extractedText = "";
 
-      while (attempt < maxRetries) {
+      while (attempt <= maxRetries) {
         try {
-          // 3. Prompt Autoritário: Obriga a leitura da grade inteira
+          // 3. Prompt Autoritário: Força a leitura da grade inteira
           const result = await model.generateContent([
-            "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Do not stop early. Read left-to-right, top-to-bottom. Return strictly comma-separated digits (e.g., 30,0,21,6,35,5,5,7,20...). No text, no spaces, no line breaks.",
+            "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Do not stop early. Read left-to-right, top-to-bottom. Output ONLY numbers separated by commas. No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
-          break;
+          if (extractedText) break;
         } catch (apiErr: any) {
           attempt++;
           const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
           if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
-            await new Promise(r => setTimeout(r, 1000));
+            if (attempt > maxRetries) throw apiErr;
+            await new Promise(r => setTimeout(r, 1500));
           } else {
             throw apiErr;
           }
         }
       }
 
-      if (!extractedText) throw new Error("A IA não retornou números legíveis.");
+      if (!extractedText) throw new Error("A IA não retornou texto algum.");
 
-      const numbers = extractedText.split(",")
-        .map(n => parseInt(n.trim()))
-        .filter(n => !isNaN(n) && n >= 0 && n <= 36)
-        .reverse();
+      // 4. Extração Inteligente (Regex) - Filtra apenas números de 0 a 36
+      const numbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || [])
+        .map(n => parseInt(n))
+        .reverse(); // Inverte para processar do mais antigo ao mais novo
 
-      if (numbers.length === 0) throw new Error("Nenhum número válido detectado na imagem.");
+      if (numbers.length === 0) {
+        throw new Error("Nenhum número válido (0-36) detectado na imagem.");
+      }
 
+      // 5. Sincronização Absoluta com o Backend
       const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ numbers }),
       });
-
+      
       const resultData = await res.json();
-      if (!res.ok) throw new Error(resultData.error || "Falha na sincronização do backend");
-
+      if (!res.ok) throw new Error(resultData.error || "Erro na sincronização");
+      
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
       if (resultData.count > 0) {
-        alert(`⚡ Extração Total: ${resultData.count} giros injetados em ${timeTaken} segundos!`);
+        alert(`⚡ Extração Total (Regex): ${resultData.count} giros injetados em ${timeTaken} segundos!`);
       } else {
         alert("Nenhum giro novo detectado em relação ao histórico atual.");
       }
-
+      
       if (typeof fetchData === 'function') fetchData();
-
+      
     } catch (err: any) {
       console.error("Erro no OCR Turbo:", err);
       const errString = String(err.message || JSON.stringify(err)).toLowerCase();
@@ -256,4 +273,4 @@ export default function App() {
     </div>
   );
   }
-        
+    
