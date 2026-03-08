@@ -93,7 +93,7 @@ export default function App() {
     const startTime = Date.now();
 
     try {
-      // 1. Otimização de Imagem (800px para upload mais rápido)
+      // 1. Imagem de Alta Qualidade (1200px) para não embaçar a grade
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -102,7 +102,7 @@ export default function App() {
           img.src = e.target?.result as string;
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const maxDim = 800; // Reduzido de 1200 para 800 (corta o tempo de upload pela metade)
+            const maxDim = 1200; 
             let width = img.width;
             let height = img.height;
             
@@ -149,9 +149,9 @@ export default function App() {
 
       while (attempt <= maxRetries) {
         try {
-          // 2. Prompt direcionado APENAS para a grade
+          // 2. Prompt Militar: Força a leitura da matriz inteira sem atalhos
           const result = await model.generateContent([
-            "Extract ONLY the numbers from the large rectangular grid. IGNORE the top horizontal highlighted bar completely. Read the grid row by row, from left-to-right, top-to-bottom. Output ONLY numbers separated by commas. No text.",
+            "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Read left-to-right, top-to-bottom. Do not stop until you reach the very last number at the bottom right. Output ONLY numbers separated by commas. No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
@@ -170,12 +170,10 @@ export default function App() {
 
       if (!extractedText) throw new Error("A IA não retornou texto algum.");
 
-      // 3. Extração e ORDENAÇÃO CORRETA (Sem o reverse)
-      // Ler a imagem da esquerda p/ direita, cima p/ baixo já nos dá a ordem: Mais Velho -> Mais Novo
+      // 3. Extração e ORDENAÇÃO RESTAURADA (.reverse())
+      // A IA lê do Mais Novo pro Mais Velho. O .reverse() arruma para Mais Velho -> Mais Novo.
       const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
-
-      // Removemos o .reverse() para manter a integridade cronológica da matriz
-      const numbers = rawNumbers; 
+      const numbers = rawNumbers.reverse(); 
 
       if (numbers.length === 0) {
         throw new Error("Nenhum número válido (0-36) detectado na imagem.");
@@ -192,7 +190,6 @@ export default function App() {
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
-      // 4. Feedback detalhado separando o que foi lido do que era novo
       if (resultData.count > 0) {
         alert(`⚡ Leitura: ${numbers.length} números.\nInjetados: ${resultData.count} novos giros em ${timeTaken}s!`);
       } else {
@@ -268,5 +265,5 @@ export default function App() {
       )}
     </div>
   );
-  }
+        }
     
