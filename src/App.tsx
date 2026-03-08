@@ -131,7 +131,7 @@ export default function App() {
       
       // 2. Modelo estrito e criatividade zerada para velocidade máxima
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         generationConfig: { temperature: 0.0, maxOutputTokens: 400 }
       });
 
@@ -175,7 +175,7 @@ export default function App() {
       });
 
       const resultData = await res.json();
-      if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
+      if (!res.ok) throw new Error(resultData.error || "Falha na sincronização do backend");
 
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -191,9 +191,10 @@ export default function App() {
       console.error("Erro no OCR Turbo:", err);
       const errString = String(err.message || JSON.stringify(err)).toLowerCase();
       if (errString.includes("503") || errString.includes("high demand")) {
-        alert("⚠️ Rede congestionada. Tente novamente.");
+        alert("⚠️ Rede congestionada. Tente novamente em alguns segundos.");
       } else {
-        alert("Erro ao processar a imagem.");
+        // Alerta detalhado para não ficarmos cegos em caso de falha
+        alert("Erro ao processar a imagem: " + (err.message || "Falha desconhecida."));
       }
     } finally {
       setLoading(false);
@@ -254,5 +255,5 @@ export default function App() {
       )}
     </div>
   );
-        }
-        
+  }
+                                                                                
