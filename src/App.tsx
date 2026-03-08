@@ -19,6 +19,7 @@ export default function App() {
   const initSession = async (retries = 3) => {
     setError(null);
     try {
+      // 1. Verificar Saúde do Banco
       const healthRes = await fetch("/api/health");
       const health = await healthRes.json();
       
@@ -27,6 +28,7 @@ export default function App() {
         throw new Error(errorMsg);
       }
 
+      // 2. Criar Sessão
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -60,10 +62,11 @@ export default function App() {
       const json = await res.json();
       setData(json);
       setZHistory((prev) => [...prev.slice(-49), json.zScore]);
-      setError(null);
+      setError(null); // Limpa erro se conseguir buscar
     } catch (err: any) {
       console.error("Erro ao buscar dados:", err.message);
       if (err.message === "Failed to fetch") {
+        // Não limpamos o sessionId, mas avisamos que a conexão caiu
         console.warn("Conexão com o servidor perdida. Tentando reconectar...");
       }
     }
@@ -79,32 +82,26 @@ export default function App() {
     }
   }, [sessionId, fetchData, error]);
 
-  // FUNÇÃO RESTAURADA: Entrada Manual
   const handleNumberClick = async (number: number) => {
     if (!sessionId) return;
-    setLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/spins`, {
+      await fetch(`/api/sessions/${sessionId}/spins`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ number }),
       });
-      if (!res.ok) throw new Error("Falha ao registrar número");
       fetchData();
-    } catch (err: any) {
-      console.error("Erro manual:", err);
-      alert("Erro ao inserir número manualmente.");
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error("Erro ao enviar número", err);
     }
   };
 
-  // FUNÇÃO BLINDADA: Leitura Óptica (OCR)
   const handleOcrUpload = async (file: File) => {
     if (!sessionId) return;
     setLoading(true);
 
     try {
+      // 1. Compressão Client-Side (Performance Institucional)
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -124,23 +121,26 @@ export default function App() {
             canvas.height = height;
             const ctx = canvas.getContext("2d");
             ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL("image/jpeg", 0.7).split(",")[1]);
+            const compressedBase64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+            resolve(compressedBase64);
           };
           img.onerror = reject;
         };
         reader.onerror = reject;
       });
 
-      const maxRetries = 4;
+      // 2. Chamada Resiliente ao Gemini (Retry Logic)
+      const maxRetries = 3;
       let attempt = 0;
       let extractedText = "";
 
+      // Lendo a chave no formato correto do Vite
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
+      if (!apiKey) throw new Error("Chave da API não configurada no .env (VITE_GEMINI_API_KEY)");
       
+      // Inicialização oficial do SDK
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-            
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
       while (attempt < maxRetries) {
         try {
@@ -148,128 +148,69 @@ export default function App() {
             "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
+          
+          // Extração correta do texto da API oficial
           extractedText = result.response.text();
-          break;
-        } catch (apiErr: any) {
-  // FUNÇÃO BLINDADA E TURBINADA: Leitura Óptica (OCR)
-  const handleOcrUpload = async (file: File) => {
-    if (!sessionId) return;
-    setLoading(true);
-    const startTime = Date.now(); // Cronômetro de performance
-
-    try {
-      // 1. Hyper-Compressão (Foco em Velocidade de Upload)
-      const base64Image = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (e) => {
-          const img = new Image();
-          img.src = e.target?.result as string;
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const maxWidth = 500; // Reduzido drasticamente para leveza extrema
-            let width = img.width;
-            let height = img.height;
-            if (width > maxWidth) {
-              height = (maxWidth / width) * height;
-              width = maxWidth;
-            }
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            ctx?.drawImage(img, 0, 0, width, height);
-            // Qualidade reduzida para 50% (0.5)
-            resolve(canvas.toDataURL("image/jpeg", 0.5).split(",")[1]);
-          };
-          img.onerror = reject;
-        };
-        reader.onerror = reject;
-      });
-
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      
-      // 2. Configuração "Sniper" (Desliga a criatividade para máxima velocidade)
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-3-flash-preview",
-        generationConfig: {
-          temperature: 0.0,       // Resposta mecânica e imediata
-          maxOutputTokens: 400,   // Bloqueia a IA de gerar textos longos
-          topK: 1,
-          topP: 1
-        }
-      });
-
-      const maxRetries = 2; // Menos insistência para não perder tempo na mesa
-      let attempt = 0;
-      let extractedText = "";
-
-      while (attempt < maxRetries) {
-        try {
-          // 3. Prompt direto em Inglês (Processamento de tokens mais rápido)
-          const result = await model.generateContent([
-            "Extract only the roulette numbers from this image. Return strictly comma-separated digits. Example: 14,24,4. No text, no spaces.",
-            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
-          ]);
-          extractedText = result.response.text();
-          break;
+          break; // Sucesso, sai do loop
         } catch (apiErr: any) {
           attempt++;
-          const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
-          const isBusy = errString.includes("503") || errString.includes("high demand") || errString.includes("429");
-
-          if (isBusy && attempt < maxRetries) {
-            await new Promise(r => setTimeout(r, 1000)); // Espera apenas 1 segundo
+          const errMsg = apiErr.message || "";
+          const isRateLimit = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("High Demand") || errMsg.includes("quota");
+          
+          if (isRateLimit && attempt < maxRetries) {
+            console.warn(`[OCR] Gemini sob alta demanda (Tentativa ${attempt}/${maxRetries}). Aguardando 2s...`);
+            // Sleep de 2 segundos antes de tentar de novo
+            await new Promise(r => setTimeout(r, 2000));
           } else {
-            throw apiErr;
+            throw apiErr; // Falha crítica ou exauriu tentativas
           }
         }
       }
 
-      if (!extractedText) throw new Error("A IA não retornou números legíveis.");
+      if (!extractedText) throw new Error("A IA não conseguiu ler os números.");
 
+      // 3. Parse e Sincronização
       const numbers = extractedText.split(",")
         .map(n => parseInt(n.trim()))
         .filter(n => !isNaN(n) && n >= 0 && n <= 36)
         .reverse();
 
-      if (numbers.length === 0) throw new Error("Nenhum número válido detectado na imagem.");
+      if (numbers.length === 0) throw new Error("Nenhum número detectado na imagem.");
 
+      // Enviando para a porta 3000 garantindo que acha o Backend
       const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ numbers }),
       });
-
+      
       const resultData = await res.json();
       if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
-
-      const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      if (resultData.count > 0) {
-        alert(`⚡ Extração Turbo: ${resultData.count} giros em ${timeTaken} segundos!`);
-      } else {
-        alert("Nenhum giro novo detectado em relação ao histórico atual.");
-      }
-
-      if (typeof fetchData === 'function') fetchData();
-
-    } catch (err: any) {
-      console.error("Erro no OCR Turbo:", err);
-      const errString = String(err.message || JSON.stringify(err)).toLowerCase();
       
-      if (errString.includes("503") || errString.includes("high demand")) {
-        alert("⚠️ Rede congestionada. Tente novamente.");
+      if (resultData.count > 0) {
+        console.log(`[RL.sys] Sucesso: ${resultData.count} novos giros sincronizados.`);
+        alert(`Sucesso! ${resultData.count} giros lidos e injetados.`);
       } else {
-        alert("Erro ao processar: " + (err.message || "Falha desconhecida."));
+        alert(resultData.message || "Nenhum novo giro detectado na imagem.");
+      }
+      
+      // Atualiza a UI se a função existir
+      if (typeof fetchData === 'function') fetchData();
+      
+    } catch (err: any) {
+      console.error("Erro no OCR Institucional:", err);
+      const errMsg = err.message || "";
+      const isHighDemand = errMsg.includes("503") || errMsg.includes("High Demand");
+      
+      if (isHighDemand) {
+        alert("A rede de IA está congestionada no momento. Aguarde alguns segundos e clique novamente.");
+      } else {
+        alert(errMsg || "Erro ao processar imagem institucional.");
       }
     } finally {
       setLoading(false);
     }
   };
-            
 
   if (error) {
     const isUnreachable = error.includes("BANCO INACESSÍVEL") || error.includes("P1001");
@@ -321,6 +262,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden">
+      {/* Metade Superior: Analytics (Autônomo) */}
       <div className="flex-shrink-0">
         <HeaderStatus 
           bankroll={data.session.current_bankroll} 
@@ -338,6 +280,7 @@ export default function App() {
         <SpinTimeline spins={data.session.spins} />
       </div>
 
+      {/* Metade Inferior: Ação (Comandos) */}
       <motion.div 
         initial={{ y: 100 }}
         animate={{ y: 0 }}
@@ -358,6 +301,7 @@ export default function App() {
         </div>
       </motion.div>
 
+      {/* Overlay de Alerta Crítico */}
       {data.session.signals.some((s: any) => s.result === "PENDING") && (
         <motion.div 
           initial={{ opacity: 0 }}
@@ -367,5 +311,4 @@ export default function App() {
       )}
     </div>
   );
-  }
-                                                    
+}
