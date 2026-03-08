@@ -82,135 +82,114 @@ export default function App() {
     }
   }, [sessionId, fetchData, error]);
 
-  const handleNumberClick = async (number: number) => {
-    if (!sessionId) return;
-    try {
-      await fetch(`/api/sessions/${sessionId}/spins`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number }),
-      });
-      fetchData();
-    } catch (err) {
-      console.error("Erro ao enviar número", err);
-    }
-  };
+// Certifique-se de que esta importação está no topo:
+// import { GoogleGenerativeAI } from "@google/generative-ai";
 
-  const handleOcrUpload = async (file: File) => {
-    if (!sessionId) return;
-    setLoading(true);
+const handleOcrUpload = async (file: File) => {
+  if (!sessionId) return;
+  setLoading(true);
 
-    try {
-      // 1. Compressão Client-Side (Performance Institucional)
-      const base64Image = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (e) => {
-          const img = new Image();
-          img.src = e.target?.result as string;
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const maxWidth = 800;
-            let width = img.width;
-            let height = img.height;
-            if (width > maxWidth) {
-              height = (maxWidth / width) * height;
-              width = maxWidth;
-            }
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            ctx?.drawImage(img, 0, 0, width, height);
-            const compressedBase64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-            resolve(compressedBase64);
-          };
-          img.onerror = reject;
-        };
-        reader.onerror = reject;
-      });
-
-      // 2. Chamada Resiliente ao Gemini (Retry Logic)
-      const maxRetries = 3;
-      let attempt = 0;
-      let extractedText = "";
-
-      // Lendo a chave no formato correto do Vite
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Chave da API não configurada no .env (VITE_GEMINI_API_KEY)");
-      
-      // Inicialização oficial do SDK
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-      while (attempt < maxRetries) {
-        try {
-          const result = await model.generateContent([
-            "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
-            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
-          ]);
-          
-          // Extração correta do texto da API oficial
-          extractedText = result.response.text();
-          break; // Sucesso, sai do loop
-        } catch (apiErr: any) {
-          attempt++;
-          const errMsg = apiErr.message || "";
-          const isRateLimit = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("High Demand") || errMsg.includes("quota");
-          
-          if (isRateLimit && attempt < maxRetries) {
-            console.warn(`[OCR] Gemini sob alta demanda (Tentativa ${attempt}/${maxRetries}). Aguardando 2s...`);
-            // Sleep de 2 segundos antes de tentar de novo
-            await new Promise(r => setTimeout(r, 2000));
-          } else {
-            throw apiErr; // Falha crítica ou exauriu tentativas
+  try {
+    const base64Image = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.src = e.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const maxWidth = 800;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = (maxWidth / width) * height;
+            width = maxWidth;
           }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.7).split(",")[1]);
+        };
+        img.onerror = reject;
+      };
+      reader.onerror = reject;
+    });
+
+    const maxRetries = 4; // Aumentamos para 4 tentativas
+    let attempt = 0;
+    let extractedText = "";
+
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) throw new Error("Chave VITE_GEMINI_API_KEY não configurada.");
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    while (attempt < maxRetries) {
+      try {
+        const result = await model.generateContent([
+          "Extraia todos os números do histórico de giros desta imagem de roleta. Retorne APENAS os números separados por vírgula, seguindo a ordem visual (primeiro a barra superior, depois a grade). Exemplo: 14,24,4... Responda EXCLUSIVAMENTE com a string de números.",
+          { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]);
+        extractedText = result.response.text();
+        break; // Sucesso absoluto
+      } catch (apiErr: any) {
+        attempt++;
+        // Converte qualquer objeto de erro para string e minúsculas para não escapar nada
+        const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
+        const isBusy = errString.includes("503") || errString.includes("high demand") || errString.includes("429");
+
+        if (isBusy && attempt < maxRetries) {
+          console.warn(`[OCR] Servidor congestionado. Tentativa ${attempt}/${maxRetries}. Aguardando 4s...`);
+          await new Promise(r => setTimeout(r, 4000)); // Espera longa de 4 segundos
+        } else {
+          throw apiErr; // Esgotou as tentativas ou é erro grave
         }
       }
-
-      if (!extractedText) throw new Error("A IA não conseguiu ler os números.");
-
-      // 3. Parse e Sincronização
-      const numbers = extractedText.split(",")
-        .map(n => parseInt(n.trim()))
-        .filter(n => !isNaN(n) && n >= 0 && n <= 36)
-        .reverse();
-
-      if (numbers.length === 0) throw new Error("Nenhum número detectado na imagem.");
-
-      // Enviando para a porta 3000 garantindo que acha o Backend
-      const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ numbers }),
-      });
-      
-      const resultData = await res.json();
-      if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
-      
-      if (resultData.count > 0) {
-        console.log(`[RL.sys] Sucesso: ${resultData.count} novos giros sincronizados.`);
-        alert(`Sucesso! ${resultData.count} giros lidos e injetados.`);
-      } else {
-        alert(resultData.message || "Nenhum novo giro detectado na imagem.");
-      }
-      
-      // Atualiza a UI se a função existir
-      if (typeof fetchData === 'function') fetchData();
-      
-    } catch (err: any) {
-      console.error("Erro no OCR Institucional:", err);
-      const errMsg = err.message || "";
-      const isHighDemand = errMsg.includes("503") || errMsg.includes("High Demand");
-      
-      if (isHighDemand) {
-        alert("A rede de IA está congestionada no momento. Aguarde alguns segundos e clique novamente.");
-      } else {
-        alert(errMsg || "Erro ao processar imagem institucional.");
-      }
-    } finally {
-      setLoading(false);
     }
-  };
+
+    if (!extractedText) throw new Error("A IA não retornou números legíveis.");
+
+    const numbers = extractedText.split(",")
+      .map(n => parseInt(n.trim()))
+      .filter(n => !isNaN(n) && n >= 0 && n <= 36)
+      .reverse();
+
+    if (numbers.length === 0) throw new Error("Nenhum número válido detectado na imagem.");
+
+    const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numbers }),
+    });
+
+    const resultData = await res.json();
+    if (!res.ok) throw new Error(resultData.error || "Falha na sincronização");
+
+    if (resultData.count > 0) {
+      alert(`Sucesso Institucional! ${resultData.count} novos giros lidos e injetados.`);
+    } else {
+      alert("Nenhum giro novo detectado em relação ao histórico atual.");
+    }
+
+    if (typeof fetchData === 'function') fetchData();
+
+  } catch (err: any) {
+    console.error("Erro no OCR:", err);
+    const errString = String(err.message || JSON.stringify(err)).toLowerCase();
+    
+    // Tratamento final na UI
+    if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
+      alert("⚠️ A rede mundial de IA está congestionada agora. O sistema tentou 4 vezes, mas o Google não liberou a passagem. Aguarde 1 minuto e clique novamente.");
+    } else {
+      alert("Erro ao processar: " + (err.message || "Falha desconhecida."));
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   if (error) {
     const isUnreachable = error.includes("BANCO INACESSÍVEL") || error.includes("P1001");
