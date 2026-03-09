@@ -57,8 +57,8 @@ async function startServer() {
 
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 2000 });
   app.use("/api/", limiter);
+  app.use(express.json({ limit: "50kb" })); // Aumentei um pouco a banda de payload
   app.use(cors());
-  app.use(express.json({ limit: "10kb" }));
 
   const validateUUID = (req: any, res: any, next: any) => {
     const { id } = req.params;
@@ -72,7 +72,10 @@ async function startServer() {
       await prisma.$connect();
       const count = await prisma.session.count();
       res.json({ status: "ok", database: "Conectado", sessions: count });
-    } catch (error: any) { res.status(500).json({ status: "error", details: error.message }); }
+    } catch (error: any) { 
+      console.error("[HEALTH ERROR]:", error);
+      res.status(500).json({ status: "error", details: error.message }); 
+    }
   });
 
   app.post("/api/sessions", async (req, res) => {
@@ -80,10 +83,12 @@ async function startServer() {
       const { initial_bankroll } = req.body;
       const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, status: "ACTIVE" } });
       res.json(session);
-    } catch (error: any) { res.status(500).json({ error: "Falha na comunicação." }); }
+    } catch (error: any) { 
+      console.error("[SESSION START ERROR]:", error);
+      res.status(500).json({ error: error.message }); 
+    }
   });
 
-  // --- ROTA DE LIQUIDAÇÃO (KILL SWITCH) ---
   app.post("/api/sessions/:id/close", validateUUID, async (req: any, res: any) => {
     try {
       const { id } = req.params;
@@ -92,7 +97,10 @@ async function startServer() {
         data: { status: "CLOSED", closed_at: new Date() }
       });
       res.json(session);
-    } catch (error: any) { res.status(500).json({ error: "Falha ao liquidar a sessão." }); }
+    } catch (error: any) { 
+      console.error("[KILL SWITCH ERROR]:", error);
+      res.status(500).json({ error: error.message }); 
+    }
   });
 
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
@@ -131,15 +139,25 @@ async function startServer() {
         return { session_id: id, number: n, created_at: new Date(now + index), ...props };
       });
 
+      // 1. Tenta salvar no banco primeiro
       await prisma.spin.createMany({ data: spinsDataBulk });
 
+      // 2. Tenta rodar a estratégia matemática
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      
+      // Se essa linha falhar, o log vai pegar
       StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
 
       res.json({ count: totalToInsert, extractedCount: totalExtractedFromIA, numbers: newNumbersToInsert });
-    } catch (error: any) { res.status(500).json({ error: "Falha ao sincronizar OCR." }); }
+    } catch (error: any) { 
+      // OBSERVABILIDADE DO BACKEND ATIVADA
+      console.error("===============================");
+      console.error("[FATAL ERROR - OCR SYNC]:", error);
+      console.error("===============================");
+      res.status(500).json({ error: error.message || "Erro interno desconhecido no Backend." }); 
+    }
   });
 
   app.post("/api/sessions/:id/spins", validateUUID, async (req: any, res: any) => {
@@ -151,19 +169,22 @@ async function startServer() {
 
       const session = await prisma.session.findUnique({ where: { id } });
       if (!session) return res.status(404).json({ error: "Sessão não encontrada." });
-      if (session.status === "CLOSED") return res.status(400).json({ error: "Sessão já está fechada." }); // Bloqueio extra
+      if (session.status === "CLOSED") return res.status(400).json({ error: "Sessão já está fechada." });
 
       const props = MathEngine.getNumberProps(number);
       const spin = await prisma.spin.create({ data: { session_id: id, number, ...props } });
 
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
-      
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      
       StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
 
       res.json(spin);
-    } catch (error: any) { res.status(500).json({ error: "Erro ao processar giro." }); }
+    } catch (error: any) { 
+      console.error("[SPIN INSERT ERROR]:", error);
+      res.status(500).json({ error: error.message }); 
+    }
   });
 
   app.get("/api/sessions/:id/dashboard", validateUUID, async (req, res) => {
@@ -175,7 +196,10 @@ async function startServer() {
       if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
       const zScore = MathEngine.calculateZScore(session.spins);
       res.json({ session, zScore });
-    } catch (error) { res.status(500).json({ error: "Erro dashboard" }); }
+    } catch (error: any) { 
+      console.error("[DASHBOARD ERROR]:", error);
+      res.status(500).json({ error: error.message }); 
+    }
   });
 
   if (process.env.NODE_ENV !== "production") {
