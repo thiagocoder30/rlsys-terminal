@@ -78,19 +78,30 @@ async function startServer() {
   app.post("/api/sessions", async (req, res) => {
     try {
       const { initial_bankroll } = req.body;
-      const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll } });
+      const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, status: "ACTIVE" } });
       res.json(session);
     } catch (error: any) { res.status(500).json({ error: "Falha na comunicação." }); }
   });
 
-  // --- ROTA DE OCR: FEEDBACK DE PRODUÇÃO (DADOS REAIS E RELEVANTES) ---
+  // --- ROTA DE LIQUIDAÇÃO (KILL SWITCH) ---
+  app.post("/api/sessions/:id/close", validateUUID, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const session = await prisma.session.update({
+        where: { id },
+        data: { status: "CLOSED", closed_at: new Date() }
+      });
+      res.json(session);
+    } catch (error: any) { res.status(500).json({ error: "Falha ao liquidar a sessão." }); }
+  });
+
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
     const { id } = req.params;
-    const { numbers } = req.body; // Vem do frontend em ordem [Oldest -> Newest]
+    const { numbers } = req.body; 
 
     if (!Array.isArray(numbers)) return res.status(400).json({ error: "Formato inválido." });
 
-    const totalExtractedFromIA = numbers.length; // Quantos a IA leu
+    const totalExtractedFromIA = numbers.length; 
 
     try {
       const lastSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 150 });
@@ -111,39 +122,48 @@ async function startServer() {
       const totalToInsert = newNumbersToInsert.length;
 
       if (totalToInsert === 0) {
-        return res.json({ 
-          count: 0, 
-          extractedCount: totalExtractedFromIA, // Dados relevantes
-          message: "Histórico já atualizado." 
-        });
+        return res.json({ count: 0, extractedCount: totalExtractedFromIA, message: "Histórico já atualizado." });
       }
 
       const now = Date.now();
       const spinsDataBulk = newNumbersToInsert.map((n, index) => {
         const props = MathEngine.getNumberProps(n);
-        return {
-          session_id: id,
-          number: n,
-          created_at: new Date(now + index), 
-          ...props
-        };
+        return { session_id: id, number: n, created_at: new Date(now + index), ...props };
       });
 
-      // Bulk Insert Blindado - Nenhuma chance de "banco sofrendo"
       await prisma.spin.createMany({ data: spinsDataBulk });
 
-      // Cérebro Orquestrador
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
 
-      res.json({ 
-        count: totalToInsert, // Quantos foram pro banco agora
-        extractedCount: totalExtractedFromIA, // Dados reais da extração
-        numbers: newNumbersToInsert 
-      });
+      res.json({ count: totalToInsert, extractedCount: totalExtractedFromIA, numbers: newNumbersToInsert });
     } catch (error: any) { res.status(500).json({ error: "Falha ao sincronizar OCR." }); }
+  });
+
+  app.post("/api/sessions/:id/spins", validateUUID, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { number } = req.body;
+
+      if (number === undefined || number < 0 || number > 36) return res.status(400).json({ error: "Número inválido." });
+
+      const session = await prisma.session.findUnique({ where: { id } });
+      if (!session) return res.status(404).json({ error: "Sessão não encontrada." });
+      if (session.status === "CLOSED") return res.status(400).json({ error: "Sessão já está fechada." }); // Bloqueio extra
+
+      const props = MathEngine.getNumberProps(number);
+      const spin = await prisma.spin.create({ data: { session_id: id, number, ...props } });
+
+      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
+      const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
+      
+      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
+
+      res.json(spin);
+    } catch (error: any) { res.status(500).json({ error: "Erro ao processar giro." }); }
   });
 
   app.get("/api/sessions/:id/dashboard", validateUUID, async (req, res) => {
@@ -173,5 +193,4 @@ async function startServer() {
 }
 
 startServer();
-            
-      
+          
