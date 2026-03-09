@@ -2,26 +2,37 @@ import { motion } from "motion/react";
 
 interface Props {
   bankroll: number;
+  initialBankroll: number;
   zScore: number;
   isConnected: boolean;
 }
 
-export function HeaderStatus({ bankroll, zScore, isConnected }: Props) {
-  // Configuração de Risco Institucional
-  const INITIAL_BANKROLL = 1000; 
-  const TAKE_PROFIT_TARGET = INITIAL_BANKROLL * 1.30; // Meta: +30% (R$ 1300)
-  const STOP_LOSS_TARGET = INITIAL_BANKROLL * 0.85;   // Trava: -15% (R$ 850)
+export function HeaderStatus({ bankroll, initialBankroll, zScore, isConnected }: Props) {
+  // --- ALGORITMO DE RISCO ADAPTATIVO INSTITUCIONAL ---
+  let tpPercent = 0.05; // Padrão: 5% (Bancas Grandes)
+  let slPercent = 0.07; // Padrão: 7% (Bancas Grandes)
 
-  const profitOrLoss = bankroll - INITIAL_BANKROLL;
+  if (initialBankroll <= 200) {
+    tpPercent = 0.10; // 10% de Alvo
+    slPercent = 0.15; // 15% de Limite
+  } else if (initialBankroll <= 1000) {
+    tpPercent = 0.07; // 7% de Alvo
+    slPercent = 0.10; // 10% de Limite
+  }
+
+  const TAKE_PROFIT_TARGET = initialBankroll * (1 + tpPercent);
+  const STOP_LOSS_TARGET = initialBankroll * (1 - slPercent);
+
+  const profitOrLoss = bankroll - initialBankroll;
   const isProfit = profitOrLoss >= 0;
 
-  // Calculando a porcentagem para a barra animada
+  // Calculando a porcentagem para a barra animada da UI
   let progressPercent = 50; 
   if (isProfit) {
-    const profitRange = TAKE_PROFIT_TARGET - INITIAL_BANKROLL;
+    const profitRange = TAKE_PROFIT_TARGET - initialBankroll;
     progressPercent = 50 + ((profitOrLoss / profitRange) * 50);
   } else {
-    const lossRange = INITIAL_BANKROLL - STOP_LOSS_TARGET;
+    const lossRange = initialBankroll - STOP_LOSS_TARGET;
     progressPercent = 50 - ((Math.abs(profitOrLoss) / lossRange) * 50);
   }
 
@@ -48,7 +59,7 @@ export function HeaderStatus({ bankroll, zScore, isConnected }: Props) {
               R$ {bankroll.toFixed(2)}
             </span>
             <span className={`text-[10px] font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-              ({isProfit ? '+' : ''}{((profitOrLoss / INITIAL_BANKROLL) * 100).toFixed(1)}%)
+              ({isProfit ? '+' : ''}{((profitOrLoss / initialBankroll) * 100).toFixed(1)}%)
             </span>
           </div>
         </div>
@@ -72,8 +83,8 @@ export function HeaderStatus({ bankroll, zScore, isConnected }: Props) {
       {/* Régua de Medição de Risco */}
       <div className="mt-5 relative z-10">
         <div className="flex justify-between text-[8px] uppercase font-bold text-gray-500 mb-1 px-1 tracking-widest">
-          <span className="text-red-500">Stop: R$ {STOP_LOSS_TARGET}</span>
-          <span className="text-green-500">Meta: R$ {TAKE_PROFIT_TARGET}</span>
+          <span className="text-red-500">Stop (-{(slPercent*100).toFixed(0)}%): R$ {STOP_LOSS_TARGET.toFixed(2)}</span>
+          <span className="text-green-500">Meta (+{(tpPercent*100).toFixed(0)}%): R$ {TAKE_PROFIT_TARGET.toFixed(2)}</span>
         </div>
         <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden relative shadow-inner">
           <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-600 z-20" />
@@ -86,7 +97,19 @@ export function HeaderStatus({ bankroll, zScore, isConnected }: Props) {
           />
         </div>
       </div>
+      
+      {/* Alerta de Retirada */}
+      {isTakeProfitHit && (
+        <div className="mt-3 bg-green-900/40 border border-green-500 p-2 rounded text-center text-[10px] font-black uppercase text-green-400 tracking-widest animate-pulse">
+          🎯 Meta Atingida! Encerre a sessão e saque os lucros.
+        </div>
+      )}
+      {isStopLossHit && (
+        <div className="mt-3 bg-red-900/40 border border-red-500 p-2 rounded text-center text-[10px] font-black uppercase text-red-400 tracking-widest animate-pulse">
+          ⚠️ Stop Loss Atingido! Aborte a operação imediatamente.
+        </div>
+      )}
     </div>
   );
-    }
-      
+}
+  
