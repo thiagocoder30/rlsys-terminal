@@ -32,11 +32,12 @@ model Spin {
 }
 
 model Strategy {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String
-  is_active   Boolean  @default(true)
-  signals     Signal[]
+  id           String   @id @default(uuid())
+  name         String   @unique
+  description  String?  // Opcional para não quebrar o Bootstrapper
+  bayes_weight Float    @default(1.0) // Restaurado o peso matemático
+  is_active    Boolean  @default(true)
+  signals      Signal[]
 }
 
 model Signal {
@@ -45,7 +46,7 @@ model Signal {
   strategy_id      String
   target_bet       String
   suggested_amount Float
-  result           String   @default("PENDING") // PENDING, WIN, LOSS
+  result           String   @default("PENDING")
   created_at       DateTime @default(now())
   session          Session  @relation(fields: [session_id], references: [id])
   strategy         Strategy @relation(fields: [strategy_id], references: [id])
