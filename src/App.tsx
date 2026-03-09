@@ -105,7 +105,7 @@ export default function App() {
       
       // --- TRANSPLANTE DE MOTOR: GEMINI PRO ---
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-2.0-flash", // Motor de raciocínio profundo
+        model: "gemini-1.5-flash", // Motor de raciocínio profundo
         generationConfig: { 
           temperature: 0.0, 
           maxOutputTokens: 8192, // Aumentamos o limite para garantir que ele não corte o texto
