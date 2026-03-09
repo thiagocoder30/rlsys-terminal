@@ -103,13 +103,13 @@ export default function App() {
 
       const genAI = new GoogleGenerativeAI(apiKey);
       
-      // CONFIGURAÇÃO ABSOLUTA: Forçando a API nativa a cuspir JSON válido
+      // --- TRANSPLANTE DE MOTOR: GEMINI PRO ---
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-3-flash-preview", 
+        model: "gemini-1.5-pro", // Motor de raciocínio profundo
         generationConfig: { 
           temperature: 0.0, 
-          maxOutputTokens: 2048,
-          responseMimeType: "application/json" // <- O SEGREDO AQUI
+          maxOutputTokens: 8192, // Aumentamos o limite para garantir que ele não corte o texto
+          responseMimeType: "application/json" 
         } 
       });
 
@@ -118,7 +118,6 @@ export default function App() {
       
       while (attempt <= maxRetries) {
         try {
-          // PROMPT MATRICIAL (Schema Mapping): Força a leitura separada por linhas
           const result = await model.generateContent([
             `You are an OCR. Extract ALL numbers from the provided roulette table image. 
             You MUST return a JSON object containing exactly these arrays. DO NOT MISS ANY ROW.
@@ -150,10 +149,8 @@ export default function App() {
         }
       }
 
-      // TRATAMENTO DA RESPOSTA ESTRUTURADA
       try {
         const jsonObj = JSON.parse(rawTextStr);
-        // Junta todas as linhas na ordem que aparecem (do mais novo para o mais velho)
         extractedNumbersArray = [
           ...(jsonObj.top_row || []),
           ...(jsonObj.grid_row_1 || []),
@@ -167,7 +164,6 @@ export default function App() {
           ...(jsonObj.grid_row_9_bottom || [])
         ];
       } catch (parseError) {
-        // Fallback se o JSON falhar
         extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
       }
       
@@ -198,7 +194,6 @@ export default function App() {
     } finally { setLoading(false); }
   };
 
-  // ... (Restante do componente)
   if (setupMode && !error) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
@@ -286,5 +281,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-          }
-        
+        }
+    
