@@ -62,8 +62,8 @@ export default function App() {
     setLoading(true);
     try {
       const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
-      if (!res.ok) throw new Error("Erro ao fechar caixa");
-      fetchData(); // Atualiza a tela para mostrar o relatório
+      if (!res.ok) throw new Error("O servidor recusou o fechamento. Verifique o banco de dados.");
+      fetchData(); 
     } catch (err: any) {
       alert("Falha no Kill Switch: " + err.message);
     } finally {
@@ -212,7 +212,6 @@ export default function App() {
   const profitPercentage = (profit / data.session.initial_bankroll) * 100;
   const isProfit = profit >= 0;
 
-  // --- TELA DE RELATÓRIO DE BATALHA (EXIBIDA QUANDO SESSÃO É FECHADA) ---
   if (isClosed) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
@@ -251,18 +250,26 @@ export default function App() {
     );
   }
 
-  // --- TELA PRINCIPAL (EM OPERAÇÃO) ---
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden relative">
-      <div className="flex-shrink-0 relative">
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden">
+      
+      {/* --- NOVA BARRA DE COMANDO (RESPONSIVA E SEM SOBREPOSIÇÃO) --- */}
+      <div className="bg-gray-950 border-b border-gray-800 p-4 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+          <span className="text-white font-black tracking-widest uppercase text-xs">RL.sys</span>
+        </div>
         <button 
           onClick={handleCloseSession}
           disabled={loading}
-          className="absolute top-4 right-4 z-50 bg-red-900/30 hover:bg-red-600/50 border border-red-500/50 text-red-500 text-[9px] uppercase font-black px-3 py-1.5 rounded-lg tracking-widest transition-colors backdrop-blur-md"
+          className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[10px] uppercase font-black px-4 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-2"
         >
-          {loading ? "..." : "Fechar Caixa"}
+          {loading ? "Processando..." : "⏹ Fechar Caixa"}
         </button>
+      </div>
+      {/* ------------------------------------------------------------- */}
 
+      <div className="flex-shrink-0 pt-2">
         <HeaderStatus bankroll={data.session.current_bankroll} initialBankroll={data.session.initial_bankroll} zScore={data.zScore} isConnected={true} />
         <div className="mt-4"><span className="px-4 text-[10px] uppercase font-bold text-gray-500">Volatilidade Z-Score</span><ZScoreSparkline data={zHistory} /></div>
         <SignalsAlertPanel signals={data.session.signals} />
@@ -308,4 +315,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-    }
+        }
+        
