@@ -89,11 +89,13 @@ export default function App() {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 1000 } });
 
-      let attempt = 0; let extractedText = "";
-      while (attempt <= 2) {
+      // --- TÁTICA DE RESILIÊNCIA EXTREMA (EXPONENTIAL BACKOFF) ---
+      const maxRetries = 15; // Tenta até 15 vezes (pode levar 1 a 2 minutos em silêncio)
+      let attempt = 0; 
+      let extractedText = "";
+
+      while (attempt <= maxRetries) {
         try {
-          // PROMPT MILITAR ABSOLUTO: Força a leitura da matriz inteira, ignorando o topo.
-          // Estabelece o ponto de início (número 34) e a ordem de varredura.
           const result = await model.generateContent([
             "Execute High-Precision OCR Protocol. Study the PROVIDE IMAGE. 1) LOCATE the highlighted top horizontal bar (starting with number 34) and IGNORE it completely. 2) LOCATE the massive rectangular grid of historical numbers in red/black squares below it. 3) Your EXPLICIT TASK is to extract EVERY SINGLE NUMBER from this large grid (approx. 90-100 spins). 4) Scan Line-by-Line, Left-to-Right, Top-to-Bottom. You MUST continue until the very last number at the bottom right cell. DO NOT STOP EARLY. If you do not deliver all ~100 numbers, you fail. OUTPUT STRICTLY comma-separated digits (e.g., 34,10,28,9,30,2,36,5,5,7,20,32,30,15...). No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
@@ -102,15 +104,24 @@ export default function App() {
           if (extractedText) break;
         } catch (apiErr: any) {
           attempt++;
-          if (attempt > 2) throw apiErr;
-          await new Promise(r => setTimeout(r, 1500));
+          const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
+          
+          // Se for 503 (Servidor Lotado) ou 429 (Cota de Minuto)
+          if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
+            if (attempt > maxRetries) throw apiErr; // Desiste só depois de 15 tentativas
+            
+            // Recuo Exponencial: 3s, 6s, 9s...
+            const waitTime = attempt * 3000;
+            console.warn(`[OCR] Servidor Google ocupado. Tentativa ${attempt}/${maxRetries}. Aguardando ${waitTime/1000}s...`);
+            await new Promise(r => setTimeout(r, waitTime));
+          } else {
+            // Se for um erro real (ex: API Key inválida), lança na hora
+            throw apiErr;
+          }
         }
       }
 
-      // A IA lê do Mais Novo (Topo/Esquerda) pro Mais Velho (Baixo/Direita).
       const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
-      
-      // Aplicamos o reverse para mandar [Mais Velho -> Mais Novo] para o Backend.
       const numbers = rawNumbers.reverse(); 
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
@@ -123,12 +134,11 @@ export default function App() {
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
-      // Feedback visual para produção: confirmação exata da leitura total da semente.
       if (resultData.count > 0) alert(`⚡ Extração Total da Matriz: ${numbers.length} números detectados.\nSucesso: ${resultData.count} novos giros injetados em ${timeTaken}s!\nSemente de calibração ativa.`);
       else alert(`Extração: ${numbers.length} números lidos na matriz.\nNenhum giro novo detectado.`);
       
       fetchData();
-    } catch (err: any) { alert("Erro OCR Militar: " + err.message); } finally { setLoading(false); }
+    } catch (err: any) { alert("Erro OCR: " + err.message); } finally { setLoading(false); }
   };
 
   if (setupMode && !error) {
@@ -168,5 +178,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-    }
-    
+                    }
+                                                          
