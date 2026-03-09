@@ -7,7 +7,6 @@ import morgan from "morgan";
 import { PrismaClient } from "@prisma/client";
 import { createServer as createViteServer } from "vite";
 import { MathEngine } from "./src/services/MathEngine.ts";
-import { RaceTrackStrategies } from "./src/services/RaceTrackStrategies.ts";
 import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator.ts";
 import { syncStrategiesToDatabase } from "./src/services/StrategyBootstrapper.ts";
 
@@ -36,14 +35,9 @@ function sanitizeDatabaseUrl(url: string | undefined): string | undefined {
             return `${protocol}${user}:${encodedPass}@${hostPart}`;
           }
         }
-        if (hostPart.includes("sslmode=require") && !remainder.includes("sslmode=require")) {
-           return `${protocol}${credentials}@${hostPart}`;
-        }
       }
     }
-  } catch (e) {
-    console.error("Erro ao tentar auto-corrigir DATABASE_URL:", e);
-  }
+  } catch (e) { console.error("Erro DATABASE_URL:", e); }
   return sanitized;
 }
 
@@ -61,11 +55,7 @@ async function startServer() {
   app.use(morgan("combined"));
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 2000,
-    message: { error: "Muitas requisições. Tente novamente em 15 minutos." }
-  });
+  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 2000 });
   app.use("/api/", limiter);
   app.use(cors());
   app.use(express.json({ limit: "10kb" }));
@@ -82,52 +72,8 @@ async function startServer() {
       await prisma.$connect();
       const count = await prisma.session.count();
       res.json({ status: "ok", database: "Conectado", sessions: count });
-    } catch (error: any) {
-      res.status(500).json({ status: "error", message: "Falha na conexão", details: error.message });
-    }
+    } catch (error: any) { res.status(500).json({ status: "error", details: error.message }); }
   });
-
-  const processNewSpin = async (sessionId: string, number: number) => {
-    const props = MathEngine.getNumberProps(number);
-    const spin = await prisma.spin.create({ data: { session_id: sessionId, number, ...props } });
-
-    const pendingSignals = await prisma.signal.findMany({ where: { session_id: sessionId, result: "PENDING" } });
-    for (const signal of pendingSignals) {
-      let isWin = false;
-      if (signal.target_bet === "RED" && props.color === "RED") isWin = true;
-      if (signal.target_bet === "BLACK" && props.color === "BLACK") isWin = true;
-      if (signal.target_bet === "CUSTOM_SECTOR_1_21") isWin = StrategyOrchestrator.VIZINHOS_1_21_COVERAGE.includes(number);
-      if (signal.target_bet === "FUSION_ZONE") isWin = StrategyOrchestrator.FUSION_COVERAGE.includes(number);
-      if (signal.target_bet === "JAMES_BOND_SET") isWin = StrategyOrchestrator.JAMES_BOND_COVERAGE.includes(number);
-
-      await prisma.signal.update({ where: { id: signal.id }, data: { result: isWin ? "WIN" : "LOSS" } });
-      const strategy = await prisma.strategy.findUnique({ where: { id: signal.strategy_id } });
-      if (strategy) {
-        const newWeight = MathEngine.updateBayesWeight(strategy.bayes_weight, isWin);
-        await prisma.strategy.update({ where: { id: strategy.id }, data: { bayes_weight: newWeight } });
-      }
-    }
-
-    const recentSpins = await prisma.spin.findMany({ where: { session_id: sessionId }, orderBy: { created_at: "desc" }, take: 100 });
-    const spinNumbers = recentSpins.map(s => s.number).reverse();
-    const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-    const recommendation = StrategyOrchestrator.analyzeMarket(spinNumbers, activeStrategies);
-
-    if (recommendation && recommendation.confidence !== "LOW") {
-      const existingPending = await prisma.signal.findFirst({
-        where: { session_id: sessionId, strategy_id: recommendation.strategyId, result: "PENDING" }
-      });
-      if (!existingPending) {
-        await prisma.signal.create({
-          data: {
-            session_id: sessionId, strategy_id: recommendation.strategyId, target_bet: recommendation.targetBet,
-            suggested_amount: recommendation.confidence === "CRITICAL" ? 50 : 10, result: "PENDING"
-          }
-        });
-      }
-    }
-    return spin;
-  };
 
   app.post("/api/sessions", async (req, res) => {
     try {
@@ -137,68 +83,66 @@ async function startServer() {
     } catch (error: any) { res.status(500).json({ error: "Falha na comunicação." }); }
   });
 
-  app.post("/api/sessions/:id/spins", validateUUID, async (req, res) => {
-    try {
-      const spin = await processNewSpin(req.params.id, req.body.number);
-      res.json(spin);
-    } catch (error) { res.status(500).json({ error: "Erro ao registrar giro" }); }
-  });
-
-  // --- ROTA DE OCR: CORREÇÃO DEFINITIVA DE ORDEM (TIMESTAMPS SEQUENCIAIS) ---
+  // --- ROTA DE OCR: FEEDBACK DE PRODUÇÃO (DADOS REAIS E RELEVANTES) ---
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
     const { id } = req.params;
-    const { numbers } = req.body;
+    const { numbers } = req.body; // Vem do frontend em ordem [Oldest -> Newest]
 
     if (!Array.isArray(numbers)) return res.status(400).json({ error: "Formato inválido." });
 
+    const totalExtractedFromIA = numbers.length; // Quantos a IA leu
+
     try {
-      const lastSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 50 });
-      const lastNumbers = lastSpins.map(s => s.number).reverse(); // Oldest to Newest
+      const lastSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 150 });
+      const lastNumbersInDB = lastSpins.map(s => s.number).reverse(); 
       
-      let newNumbers = [...numbers]; // Frontend manda [Oldest -> Newest]
-      if (lastNumbers.length > 0) {
+      let newNumbersToInsert = [...numbers]; 
+      if (lastNumbersInDB.length > 0) {
         for (let i = 0; i < numbers.length; i++) {
           const sub = numbers.slice(0, numbers.length - i);
-          const lastSub = lastNumbers.slice(-sub.length);
-          if (sub.length > 0 && JSON.stringify(sub) === JSON.stringify(lastSub)) {
-            newNumbers = numbers.slice(sub.length);
+          const lastSubInDB = lastNumbersInDB.slice(-sub.length);
+          if (sub.length > 0 && JSON.stringify(sub) === JSON.stringify(lastSubInDB)) {
+            newNumbersToInsert = numbers.slice(sub.length);
             break;
           }
         }
       }
 
-      if (newNumbers.length === 0) return res.json({ count: 0, message: "Histórico já atualizado." });
+      const totalToInsert = newNumbersToInsert.length;
+
+      if (totalToInsert === 0) {
+        return res.json({ 
+          count: 0, 
+          extractedCount: totalExtractedFromIA, // Dados relevantes
+          message: "Histórico já atualizado." 
+        });
+      }
 
       const now = Date.now();
-      const spinsData = newNumbers.map((n, index) => {
+      const spinsDataBulk = newNumbersToInsert.map((n, index) => {
         const props = MathEngine.getNumberProps(n);
         return {
           session_id: id,
           number: n,
-          // CRÍTICO: Soma 1 milissegundo para cada número, garantindo a ordem cronológica no Banco!
           created_at: new Date(now + index), 
           ...props
         };
       });
 
-      await prisma.spin.createMany({ data: spinsData });
+      // Bulk Insert Blindado - Nenhuma chance de "banco sofrendo"
+      await prisma.spin.createMany({ data: spinsDataBulk });
 
       // Cérebro Orquestrador
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 100 });
-      const spinNumbers = recentSpins.map(s => s.number).reverse();
+      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
+      const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-      const recommendation = StrategyOrchestrator.analyzeMarket(spinNumbers, activeStrategies);
+      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
 
-      if (recommendation && recommendation.confidence !== "LOW") {
-        const existingPending = await prisma.signal.findFirst({ where: { session_id: id, strategy_id: recommendation.strategyId, result: "PENDING" } });
-        if (!existingPending) {
-          await prisma.signal.create({
-            data: { session_id: id, strategy_id: recommendation.strategyId, target_bet: recommendation.targetBet, suggested_amount: 10, result: "PENDING" }
-          });
-        }
-      }
-
-      res.json({ count: newNumbers.length, numbers: newNumbers });
+      res.json({ 
+        count: totalToInsert, // Quantos foram pro banco agora
+        extractedCount: totalExtractedFromIA, // Dados reais da extração
+        numbers: newNumbersToInsert 
+      });
     } catch (error: any) { res.status(500).json({ error: "Falha ao sincronizar OCR." }); }
   });
 
@@ -206,7 +150,7 @@ async function startServer() {
     try {
       const session = await prisma.session.findUnique({
         where: { id: req.params.id },
-        include: { spins: { orderBy: { created_at: "desc" }, take: 100 }, signals: { orderBy: { created_at: "desc" }, take: 10 } },
+        include: { spins: { orderBy: { created_at: "desc" }, take: 100 }, signals: { orderBy: { created_at: "desc" }, take: 50, include: { strategy: true } } },
       });
       if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
       const zScore = MathEngine.calculateZScore(session.spins);
@@ -229,4 +173,5 @@ async function startServer() {
 }
 
 startServer();
+            
       
