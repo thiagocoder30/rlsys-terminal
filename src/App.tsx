@@ -17,7 +17,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
 
-  // --- ESTADO DE OBSERVABILIDADE (RAIO-X DO OCR) ---
   const [debugInfo, setDebugInfo] = useState<{
     isOpen: boolean;
     sentImageBase64: string | null;
@@ -93,7 +92,7 @@ export default function App() {
               ctx.drawImage(img, 0, 0, w, h); 
             }
             const finalBase64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
-            debugImageStr = `data:image/jpeg;base64,${finalBase64}`; // Salva imagem para o Raio-X
+            debugImageStr = `data:image/jpeg;base64,${finalBase64}`;
             resolve(finalBase64);
           }; img.onerror = reject;
         }; reader.onerror = reject;
@@ -103,18 +102,31 @@ export default function App() {
       if (!apiKey) throw new Error("Chave não configurada.");
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 1500 } });
+      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 2000 } });
 
       const maxRetries = 15; 
       let attempt = 0; 
       
       while (attempt <= maxRetries) {
         try {
+          // PROMPT BLINDADO COM BLOQUEIO ESTRUTURAL (JSON MODE)
           const result = await model.generateContent([
-            "Extract EVERY SINGLE NUMBER visible in this image. 1) Read the highlighted top row first. 2) Then read the entire grid below it, row by row, from left to right. Do not skip any cells. Output ONLY a comma-separated list of digits (e.g., 28, 21, 5, 35, 33, 7...). No other text.",
+            `CRITICAL DATA EXTRACTION: You are an OCR machine. Your task is to extract EVERY SINGLE NUMBER visible in the provided image.
+            
+            IMAGE STRUCTURE:
+            - A top horizontal row (approx 12 numbers).
+            - A massive grid below it (approx 8 rows x 12 columns).
+            - Total numbers: More than 100.
+            
+            ANTI-LAZINESS PROTOCOL: You are strictly forbidden from stopping early or truncating the data. You MUST scan every row to the bottom right corner.
+            
+            OUTPUT FORMAT: 
+            You must output STRICTLY a valid JSON Array of integers. NO text, NO markdown, NO explanations.
+            Example format: [28, 21, 5, 18, 20, 27, 35, 33, 7, 26, 34, 9, 5]`,
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
-          rawTextStr = result.response.text(); // Salva texto cru para o Raio-X
+          
+          rawTextStr = result.response.text(); 
           if (rawTextStr) break;
         } catch (apiErr: any) {
           attempt++;
@@ -126,12 +138,25 @@ export default function App() {
         }
       }
 
-      const rawNumbers = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
-      extractedNumbersArray = rawNumbers; // Salva array filtrado para o Raio-X
+      // TRATAMENTO DA RESPOSTA JSON
+      try {
+        // Limpa qualquer lixo de formatação (ex: ```json ... ```)
+        let cleanText = rawTextStr.replace(/```json/g, "").replace(/```/g, "").trim();
+        
+        // Garante que é um array
+        if (cleanText.startsWith("[") && cleanText.endsWith("]")) {
+          extractedNumbersArray = JSON.parse(cleanText);
+        } else {
+          // Se ele falhar em fazer o JSON, usa o Regex brutal como Fallback
+          extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+        }
+      } catch (parseError) {
+        // Fallback final
+        extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+      }
       
-      const numbers = rawNumbers.reverse(); 
+      const numbers = [...extractedNumbersArray].reverse(); 
 
-      // Abre o painel de debug na tela ANTES de salvar no banco para o usuário conferir
       setDebugInfo({
         isOpen: true,
         sentImageBase64: debugImageStr,
@@ -153,7 +178,6 @@ export default function App() {
       fetchData();
     } catch (err: any) { 
       alert("Erro OCR: " + err.message); 
-      // Abre o painel de debug mesmo em erro para ver o que causou
       setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr || "FALHA ANTES DA IA RESPONDER", filteredNumbers: extractedNumbersArray });
     } finally { setLoading(false); }
   };
@@ -193,7 +217,6 @@ export default function App() {
         </div>
       </motion.div>
 
-      {/* --- PAINEL DE OBSERVABILIDADE (RAIO-X) --- */}
       <AnimatePresence>
         {debugInfo.isOpen && (
           <motion.div 
@@ -202,11 +225,11 @@ export default function App() {
             exit={{ opacity: 0, y: 50 }} 
             className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm"
           >
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-6 mt-4">
               <h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2>
               <button 
                 onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })}
-                className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs"
+                className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors"
               >
                 Fechar
               </button>
@@ -214,24 +237,27 @@ export default function App() {
 
             <div className="space-y-6 pb-20">
               <div className="bg-black border border-gray-800 rounded-xl p-4">
-                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada ao Google</span>
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada</span>
                 {debugInfo.sentImageBase64 ? (
                   <img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />
                 ) : (
-                  <p className="text-red-500 text-xs font-mono">Falha ao comprimir imagem.</p>
+                  <p className="text-red-500 text-xs font-mono">Falha na imagem.</p>
                 )}
               </div>
 
               <div className="bg-black border border-gray-800 rounded-xl p-4">
-                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua da Inteligência Artificial</span>
-                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua (JSON) da IA</span>
+                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">
                   {debugInfo.rawAiText || "Vazio ou Erro."}
                 </pre>
               </div>
 
               <div className="bg-black border border-gray-800 rounded-xl p-4">
-                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">3. Matriz Numérica Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
-                <p className="text-green-400 font-mono text-xs leading-relaxed">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2 flex justify-between">
+                  <span>3. Matriz Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
+                  {debugInfo.filteredNumbers.length >= 90 && <span className="text-green-500">✅ SUCESSO TOTAL</span>}
+                </span>
+                <p className="text-green-400 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">
                   {debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}
                 </p>
               </div>
@@ -243,5 +269,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-  }
-               
+    }
+          
