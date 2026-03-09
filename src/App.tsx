@@ -102,27 +102,39 @@ export default function App() {
       if (!apiKey) throw new Error("Chave não configurada.");
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 2000 } });
+      
+      // CONFIGURAÇÃO ABSOLUTA: Forçando a API nativa a cuspir JSON válido
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-3-flash-preview", 
+        generationConfig: { 
+          temperature: 0.0, 
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json" // <- O SEGREDO AQUI
+        } 
+      });
 
       const maxRetries = 15; 
       let attempt = 0; 
       
       while (attempt <= maxRetries) {
         try {
-          // PROMPT BLINDADO COM BLOQUEIO ESTRUTURAL (JSON MODE)
+          // PROMPT MATRICIAL (Schema Mapping): Força a leitura separada por linhas
           const result = await model.generateContent([
-            `CRITICAL DATA EXTRACTION: You are an OCR machine. Your task is to extract EVERY SINGLE NUMBER visible in the provided image.
-            
-            IMAGE STRUCTURE:
-            - A top horizontal row (approx 12 numbers).
-            - A massive grid below it (approx 8 rows x 12 columns).
-            - Total numbers: More than 100.
-            
-            ANTI-LAZINESS PROTOCOL: You are strictly forbidden from stopping early or truncating the data. You MUST scan every row to the bottom right corner.
-            
-            OUTPUT FORMAT: 
-            You must output STRICTLY a valid JSON Array of integers. NO text, NO markdown, NO explanations.
-            Example format: [28, 21, 5, 18, 20, 27, 35, 33, 7, 26, 34, 9, 5]`,
+            `You are an OCR. Extract ALL numbers from the provided roulette table image. 
+            You MUST return a JSON object containing exactly these arrays. DO NOT MISS ANY ROW.
+            Structure:
+            {
+              "top_row": [read the highlighted top bar numbers],
+              "grid_row_1": [read the 1st row of the main grid],
+              "grid_row_2": [read the 2nd row of the main grid],
+              "grid_row_3": [read the 3rd row of the main grid],
+              "grid_row_4": [read the 4th row of the main grid],
+              "grid_row_5": [read the 5th row of the main grid],
+              "grid_row_6": [read the 6th row of the main grid],
+              "grid_row_7": [read the 7th row of the main grid],
+              "grid_row_8": [read the 8th row of the main grid],
+              "grid_row_9_bottom": [read the very last small row at the bottom]
+            }`,
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           
@@ -138,20 +150,24 @@ export default function App() {
         }
       }
 
-      // TRATAMENTO DA RESPOSTA JSON
+      // TRATAMENTO DA RESPOSTA ESTRUTURADA
       try {
-        // Limpa qualquer lixo de formatação (ex: ```json ... ```)
-        let cleanText = rawTextStr.replace(/```json/g, "").replace(/```/g, "").trim();
-        
-        // Garante que é um array
-        if (cleanText.startsWith("[") && cleanText.endsWith("]")) {
-          extractedNumbersArray = JSON.parse(cleanText);
-        } else {
-          // Se ele falhar em fazer o JSON, usa o Regex brutal como Fallback
-          extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
-        }
+        const jsonObj = JSON.parse(rawTextStr);
+        // Junta todas as linhas na ordem que aparecem (do mais novo para o mais velho)
+        extractedNumbersArray = [
+          ...(jsonObj.top_row || []),
+          ...(jsonObj.grid_row_1 || []),
+          ...(jsonObj.grid_row_2 || []),
+          ...(jsonObj.grid_row_3 || []),
+          ...(jsonObj.grid_row_4 || []),
+          ...(jsonObj.grid_row_5 || []),
+          ...(jsonObj.grid_row_6 || []),
+          ...(jsonObj.grid_row_7 || []),
+          ...(jsonObj.grid_row_8 || []),
+          ...(jsonObj.grid_row_9_bottom || [])
+        ];
       } catch (parseError) {
-        // Fallback final
+        // Fallback se o JSON falhar
         extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
       }
       
@@ -182,6 +198,7 @@ export default function App() {
     } finally { setLoading(false); }
   };
 
+  // ... (Restante do componente)
   if (setupMode && !error) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
@@ -269,5 +286,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-    }
-          
+          }
+        
