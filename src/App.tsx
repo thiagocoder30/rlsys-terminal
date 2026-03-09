@@ -56,8 +56,23 @@ export default function App() {
     if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); }
   }, [sessionId, fetchData]);
 
+  // --- PROTOCOLO DE LIQUIDAÇÃO (KILL SWITCH) ---
+  const handleCloseSession = async () => {
+    if (!sessionId || !window.confirm("ATENÇÃO: Deseja liquidar a sessão e fechar o caixa agora?")) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
+      if (!res.ok) throw new Error("Erro ao fechar caixa");
+      fetchData(); // Atualiza a tela para mostrar o relatório
+    } catch (err: any) {
+      alert("Falha no Kill Switch: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleNumberClick = async (number: number) => {
-    if (!sessionId) return;
+    if (!sessionId || data?.session?.status === "CLOSED") return;
     setLoading(true);
     try {
       await fetch(`http://localhost:3000/api/sessions/${sessionId}/spins`, {
@@ -68,7 +83,7 @@ export default function App() {
   };
 
   const handleOcrUpload = async (file: File) => {
-    if (!sessionId) return;
+    if (!sessionId || data?.session?.status === "CLOSED") return;
     setLoading(true);
     const startTime = Date.now();
     let debugImageStr = "";
@@ -102,15 +117,9 @@ export default function App() {
       if (!apiKey) throw new Error("Chave não configurada.");
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      
-      // --- TRANSPLANTE DE MOTOR: GEMINI PRO ---
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-3-flash-preview", // Motor de raciocínio profundo
-        generationConfig: { 
-          temperature: 0.0, 
-          maxOutputTokens: 8192, // Aumentamos o limite para garantir que ele não corte o texto
-          responseMimeType: "application/json" 
-        } 
+        model: "gemini-3-flash-preview", 
+        generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } 
       });
 
       const maxRetries = 15; 
@@ -136,7 +145,6 @@ export default function App() {
             }`,
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
-          
           rawTextStr = result.response.text(); 
           if (rawTextStr) break;
         } catch (apiErr: any) {
@@ -152,15 +160,9 @@ export default function App() {
       try {
         const jsonObj = JSON.parse(rawTextStr);
         extractedNumbersArray = [
-          ...(jsonObj.top_row || []),
-          ...(jsonObj.grid_row_1 || []),
-          ...(jsonObj.grid_row_2 || []),
-          ...(jsonObj.grid_row_3 || []),
-          ...(jsonObj.grid_row_4 || []),
-          ...(jsonObj.grid_row_5 || []),
-          ...(jsonObj.grid_row_6 || []),
-          ...(jsonObj.grid_row_7 || []),
-          ...(jsonObj.grid_row_8 || []),
+          ...(jsonObj.top_row || []), ...(jsonObj.grid_row_1 || []), ...(jsonObj.grid_row_2 || []),
+          ...(jsonObj.grid_row_3 || []), ...(jsonObj.grid_row_4 || []), ...(jsonObj.grid_row_5 || []),
+          ...(jsonObj.grid_row_6 || []), ...(jsonObj.grid_row_7 || []), ...(jsonObj.grid_row_8 || []),
           ...(jsonObj.grid_row_9_bottom || [])
         ];
       } catch (parseError) {
@@ -169,12 +171,7 @@ export default function App() {
       
       const numbers = [...extractedNumbersArray].reverse(); 
 
-      setDebugInfo({
-        isOpen: true,
-        sentImageBase64: debugImageStr,
-        rawAiText: rawTextStr,
-        filteredNumbers: extractedNumbersArray
-      });
+      setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr, filteredNumbers: extractedNumbersArray });
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
 
@@ -183,9 +180,6 @@ export default function App() {
       });
       const resultData = await res.json();
       if (!res.ok) throw new Error(resultData.error);
-      
-      const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`Sucesso: ${resultData.count} giros injetados em ${timeTaken}s.`);
       
       fetchData();
     } catch (err: any) { 
@@ -213,14 +207,68 @@ export default function App() {
   if (error) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center"><div className="bg-red-500/10 border border-red-500 p-6 rounded-2xl max-w-sm"><h2 className="text-red-500 font-black mb-2">Erro</h2><p className="text-gray-400 text-sm mb-4">{error}</p><button onClick={() => initSession()} className="w-full bg-red-600 text-white font-bold py-3 rounded-xl">TENTAR NOVAMENTE</button></div></div>);
   if (!data) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Sincronizando...</div></div>);
 
+  const isClosed = data.session.status === "CLOSED";
+  const profit = data.session.current_bankroll - data.session.initial_bankroll;
+  const profitPercentage = (profit / data.session.initial_bankroll) * 100;
+  const isProfit = profit >= 0;
+
+  // --- TELA DE RELATÓRIO DE BATALHA (EXIBIDA QUANDO SESSÃO É FECHADA) ---
+  if (isClosed) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
+          <div className={`absolute top-0 left-0 w-full h-2 ${isProfit ? 'bg-green-500' : 'bg-red-500'}`} />
+          <h2 className="text-white text-xl font-black uppercase tracking-widest mb-1">Caixa Fechado</h2>
+          <p className="text-gray-500 text-[10px] font-bold uppercase tracking-[0.2em] mb-8">Relatório de Operação</p>
+          
+          <div className="space-y-4 mb-8">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+              <span className="text-gray-400 text-xs font-bold uppercase">Banca Inicial</span>
+              <span className="text-white font-mono">R$ {data.session.initial_bankroll.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+              <span className="text-gray-400 text-xs font-bold uppercase">Banca Final</span>
+              <span className="text-white font-mono font-bold">R$ {data.session.current_bankroll.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center pt-2">
+              <span className="text-gray-400 text-xs font-bold uppercase">Resultado Líquido</span>
+              <div className="text-right">
+                <span className={`block text-2xl font-black ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+                  {isProfit ? '+' : ''}R$ {profit.toFixed(2)}
+                </span>
+                <span className={`text-[10px] font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                  {isProfit ? '+' : ''}{profitPercentage.toFixed(2)}%
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors">
+            Nova Sessão
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // --- TELA PRINCIPAL (EM OPERAÇÃO) ---
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden relative">
-      <div className="flex-shrink-0">
+      <div className="flex-shrink-0 relative">
+        <button 
+          onClick={handleCloseSession}
+          disabled={loading}
+          className="absolute top-4 right-4 z-50 bg-red-900/30 hover:bg-red-600/50 border border-red-500/50 text-red-500 text-[9px] uppercase font-black px-3 py-1.5 rounded-lg tracking-widest transition-colors backdrop-blur-md"
+        >
+          {loading ? "..." : "Fechar Caixa"}
+        </button>
+
         <HeaderStatus bankroll={data.session.current_bankroll} initialBankroll={data.session.initial_bankroll} zScore={data.zScore} isConnected={true} />
         <div className="mt-4"><span className="px-4 text-[10px] uppercase font-bold text-gray-500">Volatilidade Z-Score</span><ZScoreSparkline data={zHistory} /></div>
         <SignalsAlertPanel signals={data.session.signals} />
         <SpinTimeline spins={data.session.spins} />
       </div>
+      
       <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
         <div className="space-y-6">
@@ -231,47 +279,26 @@ export default function App() {
 
       <AnimatePresence>
         {debugInfo.isOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: 50 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            exit={{ opacity: 0, y: 50 }} 
-            className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm"
-          >
+          <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm">
             <div className="flex justify-between items-center mb-6 mt-4">
               <h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2>
-              <button 
-                onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })}
-                className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors"
-              >
-                Fechar
-              </button>
+              <button onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors">Fechar</button>
             </div>
-
             <div className="space-y-6 pb-20">
               <div className="bg-black border border-gray-800 rounded-xl p-4">
                 <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada</span>
-                {debugInfo.sentImageBase64 ? (
-                  <img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />
-                ) : (
-                  <p className="text-red-500 text-xs font-mono">Falha na imagem.</p>
-                )}
+                {debugInfo.sentImageBase64 ? (<img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />) : (<p className="text-red-500 text-xs font-mono">Falha na imagem.</p>)}
               </div>
-
               <div className="bg-black border border-gray-800 rounded-xl p-4">
                 <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua (JSON) da IA</span>
-                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">
-                  {debugInfo.rawAiText || "Vazio ou Erro."}
-                </pre>
+                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">{debugInfo.rawAiText || "Vazio ou Erro."}</pre>
               </div>
-
               <div className="bg-black border border-gray-800 rounded-xl p-4">
                 <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2 flex justify-between">
                   <span>3. Matriz Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
                   {debugInfo.filteredNumbers.length >= 90 && <span className="text-green-500">✅ SUCESSO TOTAL</span>}
                 </span>
-                <p className="text-green-400 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">
-                  {debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}
-                </p>
+                <p className="text-green-400 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">{debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}</p>
               </div>
             </div>
           </motion.div>
@@ -281,5 +308,4 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-        }
-    
+    }
