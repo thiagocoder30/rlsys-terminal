@@ -10,7 +10,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
   const [setupMode, setSetupMode] = useState(true);
-  const [startBankroll, setStartBankroll] = useState("100.00");
+  const [startBankroll, setStartBankroll] = useState("1000.00");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -92,9 +92,10 @@ export default function App() {
       let attempt = 0; let extractedText = "";
       while (attempt <= 2) {
         try {
-          // PROMPT MILITAR: Força a leitura completa da matriz
+          // PROMPT MILITAR ABSOLUTO: Força a leitura da matriz inteira, ignorando o topo.
+          // Estabelece o ponto de início (número 34) e a ordem de varredura.
           const result = await model.generateContent([
-            "CRITICAL TASK: This image contains a roulette history. 1) Read the top horizontal row FIRST. 2) Then, read EVERY SINGLE ROW in the large matrix grid below it. Read from left-to-right, top-to-bottom. You MUST extract all ~100 numbers. DO NOT STOP EARLY. Return ONLY the digits separated by commas (e.g., 34,10,28,9,30,2,36...). No text.",
+            "Execute High-Precision OCR Protocol. Study the PROVIDE IMAGE. 1) LOCATE the highlighted top horizontal bar (starting with number 34) and IGNORE it completely. 2) LOCATE the massive rectangular grid of historical numbers in red/black squares below it. 3) Your EXPLICIT TASK is to extract EVERY SINGLE NUMBER from this large grid (approx. 90-100 spins). 4) Scan Line-by-Line, Left-to-Right, Top-to-Bottom. You MUST continue until the very last number at the bottom right cell. DO NOT STOP EARLY. If you do not deliver all ~100 numbers, you fail. OUTPUT STRICTLY comma-separated digits (e.g., 34,10,28,9,30,2,36,5,5,7,20,32,30,15...). No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
@@ -121,11 +122,13 @@ export default function App() {
       if (!res.ok) throw new Error(resultData.error);
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
-      if (resultData.count > 0) alert(`⚡ Leitura da Matriz: ${numbers.length} números.\nInjetados: ${resultData.count} novos giros em ${timeTaken}s!`);
-      else alert(`Matriz: ${numbers.length} números lidos.\nNenhum giro novo detectado.`);
+
+      // Feedback visual para produção: confirmação exata da leitura total da semente.
+      if (resultData.count > 0) alert(`⚡ Extração Total da Matriz: ${numbers.length} números detectados.\nSucesso: ${resultData.count} novos giros injetados em ${timeTaken}s!\nSemente de calibração ativa.`);
+      else alert(`Extração: ${numbers.length} números lidos na matriz.\nNenhum giro novo detectado.`);
       
       fetchData();
-    } catch (err: any) { alert("Erro OCR: " + err.message); } finally { setLoading(false); }
+    } catch (err: any) { alert("Erro OCR Militar: " + err.message); } finally { setLoading(false); }
   };
 
   if (setupMode && !error) {
