@@ -8,65 +8,45 @@ datasource db {
 }
 
 model Session {
-  id               String   @id @default(uuid()) @db.Uuid
+  id               String   @id @default(uuid())
   initial_bankroll Float
   current_bankroll Float
-  status           String   @default("ACTIVE")
+  status           String   @default("ACTIVE") // Controla se a mesa está rodando
+  closed_at        DateTime?                   // Registra o segundo exato do saque final
   created_at       DateTime @default(now())
   spins            Spin[]
   signals          Signal[]
-
-  @@map("sessions")
 }
 
 model Spin {
-  id         String   @id @default(uuid()) @db.Uuid
-  session_id String   @db.Uuid
+  id         String   @id @default(uuid())
+  session_id String
   number     Int
   color      String
   parity     String
-  dozen      Int
-  col        Int
+  dozen      String
+  column     String
+  half       String
   created_at DateTime @default(now())
-  session    Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
-
-  @@map("spins")
+  session    Session  @relation(fields: [session_id], references: [id])
 }
 
 model Strategy {
-  id                 String              @id @default(uuid()) @db.Uuid
-  name               String
-  bayes_weight       Float               @default(0.5)
-  is_active          Boolean             @default(true)
-  created_at         DateTime            @default(now())
-  strategy_conditions StrategyCondition[]
-  signals            Signal[]
-
-  @@map("strategies")
-}
-
-model StrategyCondition {
-  id              String   @id @default(uuid()) @db.Uuid
-  strategy_id     String   @db.Uuid
-  indicator       String
-  operator        String
-  threshold_value Float
-  target_bet      String
-  strategy        Strategy @relation(fields: [strategy_id], references: [id], onDelete: Cascade)
-
-  @@map("strategy_conditions")
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  is_active   Boolean  @default(true)
+  signals     Signal[]
 }
 
 model Signal {
-  id               String   @id @default(uuid()) @db.Uuid
-  session_id       String   @db.Uuid
-  strategy_id      String   @db.Uuid
+  id               String   @id @default(uuid())
+  session_id       String
+  strategy_id      String
   target_bet       String
   suggested_amount Float
-  result           String   @default("PENDING")
+  result           String   @default("PENDING") // PENDING, WIN, LOSS
   created_at       DateTime @default(now())
-  session          Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
-  strategy         Strategy @relation(fields: [strategy_id], references: [id], onDelete: Cascade)
-
-  @@map("signals")
+  session          Session  @relation(fields: [session_id], references: [id])
+  strategy         Strategy @relation(fields: [strategy_id], references: [id])
 }
