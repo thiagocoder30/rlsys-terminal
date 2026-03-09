@@ -9,7 +9,11 @@ import { motion } from "motion/react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
+  // Estados de Configuração e Sessão
+  const [setupMode, setSetupMode] = useState(true);
+  const [startBankroll, setStartBankroll] = useState("100.00");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,6 +21,7 @@ export default function App() {
 
   const initSession = async (retries = 3) => {
     setError(null);
+    setLoading(true);
     try {
       const healthRes = await fetch("/api/health");
       const health = await healthRes.json();
@@ -26,22 +31,31 @@ export default function App() {
         throw new Error(errorMsg);
       }
 
+      // Converte o texto digitado pelo usuário para número
+      const initial_bankroll = parseFloat(startBankroll.replace(",", "."));
+      if (isNaN(initial_bankroll) || initial_bankroll <= 0) {
+        throw new Error("Valor de banca inválido.");
+      }
+
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initial_bankroll: 1000 }),
+        body: JSON.stringify({ initial_bankroll }),
       });
       
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro na resposta do servidor");
       
       setSessionId(json.id);
+      setSetupMode(false); // Desliga a tela inicial
     } catch (err: any) {
       if (retries > 0 && err.message === "Failed to fetch") {
         setTimeout(() => initSession(retries - 1), 2000);
       } else {
         setError(err.message || "Não foi possível conectar ao servidor.");
       }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -59,15 +73,14 @@ export default function App() {
     }
   }, [sessionId]);
 
+  // Apenas puxa dados periodicamente SE a sessão já estiver ativa
   useEffect(() => {
-    if (!sessionId && !error) {
-      initSession();
-    } else if (sessionId) {
+    if (sessionId) {
       fetchData();
       const interval = setInterval(fetchData, 5000);
       return () => clearInterval(interval);
     }
-  }, [sessionId, fetchData, error]);
+  }, [sessionId, fetchData]);
 
   const handleNumberClick = async (number: number) => {
     if (!sessionId) return;
@@ -93,7 +106,6 @@ export default function App() {
     const startTime = Date.now();
 
     try {
-      // 1. Imagem de Alta Qualidade (1200px) para não embaçar a grade
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -107,15 +119,9 @@ export default function App() {
             let height = img.height;
             
             if (width > height) {
-              if (width > maxDim) {
-                height *= maxDim / width;
-                width = maxDim;
-              }
+              if (width > maxDim) { height *= maxDim / width; width = maxDim; }
             } else {
-              if (height > maxDim) {
-                width *= maxDim / height;
-                height = maxDim;
-              }
+              if (height > maxDim) { width *= maxDim / height; height = maxDim; }
             }
             
             canvas.width = width;
@@ -149,7 +155,6 @@ export default function App() {
 
       while (attempt <= maxRetries) {
         try {
-          // 2. Prompt Militar: Força a leitura da matriz inteira sem atalhos
           const result = await model.generateContent([
             "Extract ALL numbers from this roulette board. You MUST read the top horizontal row AND every single row in the large grid below it. Read left-to-right, top-to-bottom. Do not stop until you reach the very last number at the bottom right. Output ONLY numbers separated by commas. No text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
@@ -170,14 +175,10 @@ export default function App() {
 
       if (!extractedText) throw new Error("A IA não retornou texto algum.");
 
-      // 3. Extração e ORDENAÇÃO RESTAURADA (.reverse())
-      // A IA lê do Mais Novo pro Mais Velho. O .reverse() arruma para Mais Velho -> Mais Novo.
       const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
       const numbers = rawNumbers.reverse(); 
 
-      if (numbers.length === 0) {
-        throw new Error("Nenhum número válido (0-36) detectado na imagem.");
-      }
+      if (numbers.length === 0) throw new Error("Nenhum número válido (0-36) detectado.");
 
       const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, {
         method: "POST",
@@ -211,6 +212,44 @@ export default function App() {
     }
   };
 
+  // --- TELA INICIAL (SETUP DE BANCA) ---
+  if (setupMode && !error) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="w-16 h-16 bg-indigo-500/20 rounded-2xl flex items-center justify-center mb-6 border border-indigo-500/50 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+          <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+        </div>
+        <h1 className="text-white text-3xl font-black uppercase tracking-tighter mb-2">RL.sys</h1>
+        <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Terminal Institucional</p>
+        
+        <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl">
+          <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">
+            Banca Atual de Operação (R$)
+          </label>
+          <input 
+            type="number" 
+            value={startBankroll}
+            onChange={(e) => setStartBankroll(e.target.value)}
+            className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white text-2xl font-black focus:outline-none focus:border-indigo-500 transition-colors mb-6 text-center"
+            placeholder="Ex: 150.00"
+          />
+          
+          <button 
+            onClick={() => initSession()}
+            disabled={loading}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-all active:scale-95 shadow-lg shadow-indigo-900/20 disabled:opacity-50"
+          >
+            {loading ? "Conectando..." : "Iniciar Sessão Segura"}
+          </button>
+        </div>
+        <p className="text-gray-600 text-[10px] mt-8 max-w-xs leading-relaxed">
+          O algoritmo ajustará as metas de Take Profit e Stop Loss de acordo com a sua exposição de capital.
+        </p>
+      </div>
+    );
+  }
+
+  // --- TELA DE ERRO ---
   if (error) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center">
@@ -225,19 +264,26 @@ export default function App() {
     );
   }
 
+  // --- TELA DE CARREGAMENTO (AGUARDANDO DADOS INICIAIS) ---
   if (!data) {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center">
         <div className="text-indigo-500 animate-pulse font-black text-2xl tracking-tighter mb-2">RL.SYS INITIALIZING...</div>
-        <div className="text-gray-600 text-[10px] uppercase tracking-[0.3em]">Verificando Protocolos de Dados</div>
+        <div className="text-gray-600 text-[10px] uppercase tracking-[0.3em]">Sincronizando Protocolos</div>
       </div>
     );
   }
 
+  // --- DASHBOARD PRINCIPAL ---
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden">
       <div className="flex-shrink-0">
-        <HeaderStatus bankroll={data.session.current_bankroll} zScore={data.zScore} isConnected={true} />
+        <HeaderStatus 
+          bankroll={data.session.current_bankroll} 
+          initialBankroll={data.session.initial_bankroll} // Puxa do backend o valor inicial exato
+          zScore={data.zScore} 
+          isConnected={true} 
+        />
         <div className="mt-4">
           <span className="px-4 text-[10px] uppercase font-bold text-gray-500 tracking-widest">Volatilidade Z-Score</span>
           <ZScoreSparkline data={zHistory} />
@@ -265,5 +311,5 @@ export default function App() {
       )}
     </div>
   );
-        }
-    
+    }
+          
