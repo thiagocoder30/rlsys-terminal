@@ -77,8 +77,15 @@ export default function App() {
             else { if (h > maxDim) { w *= maxDim / h; h = maxDim; } }
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext("2d");
-            if (ctx) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, w, h); }
-            resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+            if (ctx) { 
+              ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; 
+              
+              // --- FILTRO DE ENGENHARIA DE DOCUMENTO BLINDADO ---
+              // Inverte cores, grayscale e contraste agressivo para transformar preto/vermelho em branco brillante com texto preto nítido.
+              ctx.filter = 'contrast(2.5) grayscale(1) invert(1)'; 
+              ctx.drawImage(img, 0, 0, w, h); 
+            }
+            resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
           }; img.onerror = reject;
         }; reader.onerror = reject;
       });
@@ -87,17 +94,16 @@ export default function App() {
       if (!apiKey) throw new Error("Chave não configurada.");
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 1000 } });
+      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 1500 } });
 
-      // --- TÁTICA DE RESILIÊNCIA EXTREMA (EXPONENTIAL BACKOFF) ---
-      const maxRetries = 15; // Tenta até 15 vezes (pode levar 1 a 2 minutos em silêncio)
-      let attempt = 0; 
-      let extractedText = "";
+      const maxRetries = 15; // Mantém a resiliência extrema (Backoff)
+      let attempt = 0; let extractedText = "";
 
       while (attempt <= maxRetries) {
         try {
+          // PROMPT MILITAR ABSOLUTO: Focado na imagem com nitidez forçada
           const result = await model.generateContent([
-            "Execute High-Precision OCR Protocol. Study the PROVIDE IMAGE. 1) LOCATE the highlighted top horizontal bar (starting with number 34) and IGNORE it completely. 2) LOCATE the massive rectangular grid of historical numbers in red/black squares below it. 3) Your EXPLICIT TASK is to extract EVERY SINGLE NUMBER from this large grid (approx. 90-100 spins). 4) Scan Line-by-Line, Left-to-Right, Top-to-Bottom. You MUST continue until the very last number at the bottom right cell. DO NOT STOP EARLY. If you do not deliver all ~100 numbers, you fail. OUTPUT STRICTLY comma-separated digits (e.g., 34,10,28,9,30,2,36,5,5,7,20,32,30,15...). No text.",
+            "Execute High-Precision OCR Protocol. Study the provided high-contrast document-style image. Locate the horizontal top row and IGNORE it. Locate the large historical grid below it. Your explicit military mission is to extract EVERY SINGLE NUMBER (0-36) from this grid. Scan line-by-line, left-to-right, top-to-bottom. You must read all approx. 90-100 spins. Stop only when you reach the very last cell at the bottom right. Deliver ONLY comma-separated digits. If you fail to extract 100%, you fail. No text output.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
           extractedText = result.response.text();
@@ -105,23 +111,19 @@ export default function App() {
         } catch (apiErr: any) {
           attempt++;
           const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
-          
-          // Se for 503 (Servidor Lotado) ou 429 (Cota de Minuto)
           if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
-            if (attempt > maxRetries) throw apiErr; // Desiste só depois de 15 tentativas
-            
-            // Recuo Exponencial: 3s, 6s, 9s...
+            if (attempt > maxRetries) throw apiErr;
             const waitTime = attempt * 3000;
             console.warn(`[OCR] Servidor Google ocupado. Tentativa ${attempt}/${maxRetries}. Aguardando ${waitTime/1000}s...`);
             await new Promise(r => setTimeout(r, waitTime));
-          } else {
-            // Se for um erro real (ex: API Key inválida), lança na hora
-            throw apiErr;
-          }
+          } else { throw apiErr; }
         }
       }
 
+      // A IA lê do Mais Novo (Topo/Esquerda) pro Mais Velho (Baixo/Direita).
       const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+      
+      // Aplicamos o reverse para mandar [Mais Velho -> Mais Novo] para o Backend.
       const numbers = rawNumbers.reverse(); 
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
@@ -134,8 +136,15 @@ export default function App() {
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
 
-      if (resultData.count > 0) alert(`⚡ Extração Total da Matriz: ${numbers.length} números detectados.\nSucesso: ${resultData.count} novos giros injetados em ${timeTaken}s!\nSemente de calibração ativa.`);
-      else alert(`Extração: ${numbers.length} números lidos na matriz.\nNenhum giro novo detectado.`);
+      // --- ALERTA COM DADOS REAIS E RELEVANTES ---
+      if (resultData.count > 0) {
+        alert(`⚡ OCR Semente de Calibração: SUCESSO!\n\n` +
+              `📊 Dados Extraídos pela IA: ${resultData.extractedCount} números da matriz.\n` +
+              `✅ Novos Giros Inseridos no Banco: ${resultData.count}.\n\n` +
+              `⏱️ Tempo de Processamento: ${timeTaken}s.\nSessão Calibrada.`);
+      } else {
+        alert(`Semente OCR: ${resultData.extractedCount} números lidos na matriz.\nNenhum giro novo (banco já atualizado).`);
+      }
       
       fetchData();
     } catch (err: any) { alert("Erro OCR: " + err.message); } finally { setLoading(false); }
@@ -178,5 +187,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-                    }
-                                                          
+  }
+      
