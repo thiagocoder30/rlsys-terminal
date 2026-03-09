@@ -5,7 +5,7 @@ import { ZScoreSparkline } from "./components/ZScoreSparkline";
 import { SpinTimeline } from "./components/SpinTimeline";
 import { ManualEntryInput } from "./components/ManualEntryInput";
 import { OcrButton } from "./components/OcrButton";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
@@ -16,6 +16,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
+
+  // --- ESTADO DE OBSERVABILIDADE (RAIO-X DO OCR) ---
+  const [debugInfo, setDebugInfo] = useState<{
+    isOpen: boolean;
+    sentImageBase64: string | null;
+    rawAiText: string;
+    filteredNumbers: number[];
+  }>({ isOpen: false, sentImageBase64: null, rawAiText: "", filteredNumbers: [] });
 
   const initSession = async (retries = 3) => {
     setError(null); setLoading(true);
@@ -64,6 +72,9 @@ export default function App() {
     if (!sessionId) return;
     setLoading(true);
     const startTime = Date.now();
+    let debugImageStr = "";
+    let rawTextStr = "";
+    let extractedNumbersArray: number[] = [];
 
     try {
       const base64Image = await new Promise<string>((resolve, reject) => {
@@ -79,13 +90,11 @@ export default function App() {
             const ctx = canvas.getContext("2d");
             if (ctx) { 
               ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; 
-              
-              // --- FILTRO DE ENGENHARIA DE DOCUMENTO BLINDADO ---
-              // Inverte cores, grayscale e contraste agressivo para transformar preto/vermelho em branco brillante com texto preto nítido.
-              ctx.filter = 'contrast(2.5) grayscale(1) invert(1)'; 
               ctx.drawImage(img, 0, 0, w, h); 
             }
-            resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
+            const finalBase64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+            debugImageStr = `data:image/jpeg;base64,${finalBase64}`; // Salva imagem para o Raio-X
+            resolve(finalBase64);
           }; img.onerror = reject;
         }; reader.onerror = reject;
       });
@@ -96,35 +105,39 @@ export default function App() {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 1500 } });
 
-      const maxRetries = 15; // Mantém a resiliência extrema (Backoff)
-      let attempt = 0; let extractedText = "";
-
+      const maxRetries = 15; 
+      let attempt = 0; 
+      
       while (attempt <= maxRetries) {
         try {
-          // PROMPT MILITAR ABSOLUTO: Focado na imagem com nitidez forçada
           const result = await model.generateContent([
-            "Execute High-Precision OCR Protocol. Study the provided high-contrast document-style image. Locate the horizontal top row and IGNORE it. Locate the large historical grid below it. Your explicit military mission is to extract EVERY SINGLE NUMBER (0-36) from this grid. Scan line-by-line, left-to-right, top-to-bottom. You must read all approx. 90-100 spins. Stop only when you reach the very last cell at the bottom right. Deliver ONLY comma-separated digits. If you fail to extract 100%, you fail. No text output.",
+            "Extract EVERY SINGLE NUMBER visible in this image. 1) Read the highlighted top row first. 2) Then read the entire grid below it, row by row, from left to right. Do not skip any cells. Output ONLY a comma-separated list of digits (e.g., 28, 21, 5, 35, 33, 7...). No other text.",
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
           ]);
-          extractedText = result.response.text();
-          if (extractedText) break;
+          rawTextStr = result.response.text(); // Salva texto cru para o Raio-X
+          if (rawTextStr) break;
         } catch (apiErr: any) {
           attempt++;
           const errString = String(apiErr.message || JSON.stringify(apiErr)).toLowerCase();
           if (errString.includes("503") || errString.includes("high demand") || errString.includes("429")) {
             if (attempt > maxRetries) throw apiErr;
-            const waitTime = attempt * 3000;
-            console.warn(`[OCR] Servidor Google ocupado. Tentativa ${attempt}/${maxRetries}. Aguardando ${waitTime/1000}s...`);
-            await new Promise(r => setTimeout(r, waitTime));
+            await new Promise(r => setTimeout(r, attempt * 3000));
           } else { throw apiErr; }
         }
       }
 
-      // A IA lê do Mais Novo (Topo/Esquerda) pro Mais Velho (Baixo/Direita).
-      const rawNumbers = (extractedText.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+      const rawNumbers = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n));
+      extractedNumbersArray = rawNumbers; // Salva array filtrado para o Raio-X
       
-      // Aplicamos o reverse para mandar [Mais Velho -> Mais Novo] para o Backend.
       const numbers = rawNumbers.reverse(); 
+
+      // Abre o painel de debug na tela ANTES de salvar no banco para o usuário conferir
+      setDebugInfo({
+        isOpen: true,
+        sentImageBase64: debugImageStr,
+        rawAiText: rawTextStr,
+        filteredNumbers: extractedNumbersArray
+      });
 
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
 
@@ -135,19 +148,14 @@ export default function App() {
       if (!res.ok) throw new Error(resultData.error);
       
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      // --- ALERTA COM DADOS REAIS E RELEVANTES ---
-      if (resultData.count > 0) {
-        alert(`⚡ OCR Semente de Calibração: SUCESSO!\n\n` +
-              `📊 Dados Extraídos pela IA: ${resultData.extractedCount} números da matriz.\n` +
-              `✅ Novos Giros Inseridos no Banco: ${resultData.count}.\n\n` +
-              `⏱️ Tempo de Processamento: ${timeTaken}s.\nSessão Calibrada.`);
-      } else {
-        alert(`Semente OCR: ${resultData.extractedCount} números lidos na matriz.\nNenhum giro novo (banco já atualizado).`);
-      }
+      console.log(`Sucesso: ${resultData.count} giros injetados em ${timeTaken}s.`);
       
       fetchData();
-    } catch (err: any) { alert("Erro OCR: " + err.message); } finally { setLoading(false); }
+    } catch (err: any) { 
+      alert("Erro OCR: " + err.message); 
+      // Abre o painel de debug mesmo em erro para ver o que causou
+      setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr || "FALHA ANTES DA IA RESPONDER", filteredNumbers: extractedNumbersArray });
+    } finally { setLoading(false); }
   };
 
   if (setupMode && !error) {
@@ -170,7 +178,7 @@ export default function App() {
   if (!data) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Sincronizando...</div></div>);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden">
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden relative">
       <div className="flex-shrink-0">
         <HeaderStatus bankroll={data.session.current_bankroll} initialBankroll={data.session.initial_bankroll} zScore={data.zScore} isConnected={true} />
         <div className="mt-4"><span className="px-4 text-[10px] uppercase font-bold text-gray-500">Volatilidade Z-Score</span><ZScoreSparkline data={zHistory} /></div>
@@ -184,8 +192,56 @@ export default function App() {
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
-      {data.session.signals.some((s: any) => s.result === "PENDING") && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
+
+      {/* --- PAINEL DE OBSERVABILIDADE (RAIO-X) --- */}
+      <AnimatePresence>
+        {debugInfo.isOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, y: 50 }} 
+            className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2>
+              <button 
+                onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })}
+                className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="space-y-6 pb-20">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada ao Google</span>
+                {debugInfo.sentImageBase64 ? (
+                  <img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />
+                ) : (
+                  <p className="text-red-500 text-xs font-mono">Falha ao comprimir imagem.</p>
+                )}
+              </div>
+
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua da Inteligência Artificial</span>
+                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50">
+                  {debugInfo.rawAiText || "Vazio ou Erro."}
+                </pre>
+              </div>
+
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">3. Matriz Numérica Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
+                <p className="text-green-400 font-mono text-xs leading-relaxed">
+                  {debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
   }
-      
+               
