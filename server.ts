@@ -57,7 +57,7 @@ async function startServer() {
 
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 2000 });
   app.use("/api/", limiter);
-  app.use(express.json({ limit: "50kb" })); // Aumentei um pouco a banda de payload
+  app.use(express.json({ limit: "50kb" })); 
   app.use(cors());
 
   const validateUUID = (req: any, res: any, next: any) => {
@@ -103,6 +103,7 @@ async function startServer() {
     }
   });
 
+  // --- ROTA DE OCR COM CONVERSÃO DE TIPOS BLINDADA ---
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
     const { id } = req.params;
     const { numbers } = req.body; 
@@ -136,30 +137,37 @@ async function startServer() {
       const now = Date.now();
       const spinsDataBulk = newNumbersToInsert.map((n, index) => {
         const props = MathEngine.getNumberProps(n);
-        return { session_id: id, number: n, created_at: new Date(now + index), ...props };
+        return { 
+          session_id: id, 
+          number: n, 
+          created_at: new Date(now + index), 
+          color: props.color,
+          parity: props.parity,
+          // CONVERSÃO DE TIPO OBRIGATÓRIA PARA O PRISMA
+          dozen: String(props.dozen),
+          column: String(props.column),
+          half: String(props.half)
+        };
       });
 
-      // 1. Tenta salvar no banco primeiro
       await prisma.spin.createMany({ data: spinsDataBulk });
 
-      // 2. Tenta rodar a estratégia matemática
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      // Se essa linha falhar, o log vai pegar
       StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
 
       res.json({ count: totalToInsert, extractedCount: totalExtractedFromIA, numbers: newNumbersToInsert });
     } catch (error: any) { 
-      // OBSERVABILIDADE DO BACKEND ATIVADA
       console.error("===============================");
       console.error("[FATAL ERROR - OCR SYNC]:", error);
       console.error("===============================");
-      res.status(500).json({ error: error.message || "Erro interno desconhecido no Backend." }); 
+      res.status(500).json({ error: error.message || "Erro interno no Backend." }); 
     }
   });
 
+  // --- ROTA MANUAL COM CONVERSÃO DE TIPOS BLINDADA ---
   app.post("/api/sessions/:id/spins", validateUUID, async (req: any, res: any) => {
     try {
       const { id } = req.params;
@@ -172,7 +180,18 @@ async function startServer() {
       if (session.status === "CLOSED") return res.status(400).json({ error: "Sessão já está fechada." });
 
       const props = MathEngine.getNumberProps(number);
-      const spin = await prisma.spin.create({ data: { session_id: id, number, ...props } });
+      const spin = await prisma.spin.create({ 
+        data: { 
+          session_id: id, 
+          number, 
+          color: props.color,
+          parity: props.parity,
+          // CONVERSÃO DE TIPO OBRIGATÓRIA PARA O PRISMA
+          dozen: String(props.dozen),
+          column: String(props.column),
+          half: String(props.half)
+        } 
+      });
 
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
@@ -217,4 +236,3 @@ async function startServer() {
 }
 
 startServer();
-                        
