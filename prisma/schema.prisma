@@ -11,8 +11,9 @@ model Session {
   id               String   @id @default(uuid())
   initial_bankroll Float
   current_bankroll Float
-  status           String   @default("ACTIVE") // Controla se a mesa está rodando
-  closed_at        DateTime?                   // Registra o segundo exato do saque final
+  min_chip         Float    @default(0.50) // NOVO: A ficha mínima da roleta escolhida
+  status           String   @default("ACTIVE")
+  closed_at        DateTime?
   created_at       DateTime @default(now())
   spins            Spin[]
   signals          Signal[]
@@ -34,8 +35,8 @@ model Spin {
 model Strategy {
   id           String   @id @default(uuid())
   name         String   @unique
-  description  String?  // Opcional para não quebrar o Bootstrapper
-  bayes_weight Float    @default(1.0) // Restaurado o peso matemático
+  description  String?
+  bayes_weight Float    @default(1.0)
   is_active    Boolean  @default(true)
   signals      Signal[]
 }
@@ -45,7 +46,7 @@ model Signal {
   session_id       String
   strategy_id      String
   target_bet       String
-  suggested_amount Float
+  suggested_amount Float    // Agora será calculado dinamicamente por Kelly
   result           String   @default("PENDING")
   created_at       DateTime @default(now())
   session          Session  @relation(fields: [session_id], references: [id])
