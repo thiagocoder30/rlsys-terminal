@@ -56,7 +56,6 @@ export default function App() {
     if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); }
   }, [sessionId, fetchData]);
 
-  // --- PROTOCOLO DE LIQUIDAÇÃO (KILL SWITCH) ---
   const handleCloseSession = async () => {
     if (!sessionId || !window.confirm("ATENÇÃO: Deseja liquidar a sessão e fechar o caixa agora?")) return;
     setLoading(true);
@@ -219,7 +218,6 @@ export default function App() {
           <div className={`absolute top-0 left-0 w-full h-2 ${isProfit ? 'bg-green-500' : 'bg-red-500'}`} />
           <h2 className="text-white text-xl font-black uppercase tracking-widest mb-1">Caixa Fechado</h2>
           <p className="text-gray-500 text-[10px] font-bold uppercase tracking-[0.2em] mb-8">Relatório de Operação</p>
-          
           <div className="space-y-4 mb-8">
             <div className="flex justify-between items-center border-b border-gray-800 pb-2">
               <span className="text-gray-400 text-xs font-bold uppercase">Banca Inicial</span>
@@ -232,46 +230,58 @@ export default function App() {
             <div className="flex justify-between items-center pt-2">
               <span className="text-gray-400 text-xs font-bold uppercase">Resultado Líquido</span>
               <div className="text-right">
-                <span className={`block text-2xl font-black ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-                  {isProfit ? '+' : ''}R$ {profit.toFixed(2)}
-                </span>
-                <span className={`text-[10px] font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                  {isProfit ? '+' : ''}{profitPercentage.toFixed(2)}%
-                </span>
+                <span className={`block text-2xl font-black ${isProfit ? 'text-green-500' : 'text-red-500'}`}>{isProfit ? '+' : ''}R$ {profit.toFixed(2)}</span>
+                <span className={`text-[10px] font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>{isProfit ? '+' : ''}{profitPercentage.toFixed(2)}%</span>
               </div>
             </div>
           </div>
-          
-          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors">
-            Nova Sessão
-          </button>
+          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors">Nova Sessão</button>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden">
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-hidden relative">
       
-      {/* --- NOVA BARRA DE COMANDO (RESPONSIVA E SEM SOBREPOSIÇÃO) --- */}
       <div className="bg-gray-950 border-b border-gray-800 p-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
           <span className="text-white font-black tracking-widest uppercase text-xs">RL.sys</span>
         </div>
-        <button 
-          onClick={handleCloseSession}
-          disabled={loading}
-          className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[10px] uppercase font-black px-4 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-2"
-        >
+        <button onClick={handleCloseSession} disabled={loading} className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[10px] uppercase font-black px-4 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-2">
           {loading ? "Processando..." : "⏹ Fechar Caixa"}
         </button>
       </div>
-      {/* ------------------------------------------------------------- */}
 
       <div className="flex-shrink-0 pt-2">
         <HeaderStatus bankroll={data.session.current_bankroll} initialBankroll={data.session.initial_bankroll} zScore={data.zScore} isConnected={true} />
         <div className="mt-4"><span className="px-4 text-[10px] uppercase font-bold text-gray-500">Volatilidade Z-Score</span><ZScoreSparkline data={zHistory} /></div>
+        
+        {/* --- NOVO PAINEL RESPONSIVO DE AUTO-TUNING --- */}
+        {data.strategiesStatus && data.strategiesStatus.length > 0 && (
+          <div className="mt-6 mx-4 bg-gray-900/50 border border-gray-800 rounded-xl p-4 shadow-inner">
+            <span className="block text-[10px] uppercase font-black text-gray-500 tracking-[0.2em] mb-3">Motor Quantitativo (Auto-Tuning)</span>
+            <div className="space-y-2">
+              {data.strategiesStatus.map((strat: any) => (
+                <div key={strat.id} className="flex justify-between items-center bg-black/40 p-2.5 rounded-lg border border-gray-800/50">
+                  <span className="text-[11px] font-bold text-gray-300 tracking-wide">{strat.name}</span>
+                  {strat.isHot ? (
+                    <span className="text-green-400 bg-green-900/20 border border-green-500/30 px-2 py-1 rounded text-[9px] uppercase tracking-widest flex items-center gap-1.5 shadow-[0_0_10px_rgba(34,197,94,0.1)]">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Operando
+                    </span>
+                  ) : (
+                    <span className="text-orange-400 bg-orange-900/20 border border-orange-500/30 px-2 py-1 rounded text-[9px] uppercase tracking-widest flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Cooldown
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* --------------------------------------------- */}
+
         <SignalsAlertPanel signals={data.session.signals} />
         <SpinTimeline spins={data.session.spins} />
       </div>
@@ -315,5 +325,5 @@ export default function App() {
       {data.session.signals.some((s: any) => s.result === "PENDING") && !debugInfo.isOpen && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 pointer-events-none border-[8px] border-red-500/30 animate-pulse z-50" />)}
     </div>
   );
-        }
-        
+  }
+    
