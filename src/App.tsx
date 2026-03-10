@@ -9,14 +9,11 @@ import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
-  // MÁQUINA DE ESTADOS INSTITUCIONAL
   const [currentView, setCurrentView] = useState<"MACRO" | "SETUP" | "ACTIVE">("MACRO");
   
-  // DADOS DA VISÃO MACRO (DIRETORIA)
   const [macroData, setMacroData] = useState<any>(null);
   const [loadingMacro, setLoadingMacro] = useState(true);
 
-  // DADOS DA OPERAÇÃO (SESSÃO ATIVA)
   const [startBankroll, setStartBankroll] = useState("1000.00");
   const [minChip, setMinChip] = useState<number>(0.50); 
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -59,7 +56,7 @@ export default function App() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
       setSessionId(json.id); 
-      setCurrentView("ACTIVE"); // Avança para a mesa de operação
+      setCurrentView("ACTIVE"); 
     } catch (err: any) {
       if (retries > 0) setTimeout(() => initSession(retries - 1), 2000);
       else setError(err.message || "Erro de conexão.");
@@ -167,9 +164,6 @@ export default function App() {
     } finally { setLoading(false); }
   };
 
-  // ==========================================
-  // VIEW 1: PAINEL MACRO (DIRETOR DO FUNDO)
-  // ==========================================
   if (currentView === "MACRO") {
     if (loadingMacro) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Carregando Histórico...</div></div>);
     
@@ -229,9 +223,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // VIEW 2: TELA DE SETUP DA OPERAÇÃO
-  // ==========================================
   if (currentView === "SETUP") {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
@@ -263,9 +254,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // VIEW 3: MESA DE OPERAÇÃO E RELATÓRIO
-  // ==========================================
   if (error) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center"><div className="bg-red-500/10 border border-red-500 p-6 rounded-2xl max-w-sm"><h2 className="text-red-500 font-black mb-2">Erro</h2><p className="text-gray-400 text-sm mb-4">{error}</p><button onClick={() => setCurrentView("SETUP")} className="w-full bg-red-600 text-white font-bold py-3 rounded-xl">VOLTAR</button></div></div>);
   if (!data) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Sincronizando...</div></div>);
 
@@ -325,4 +313,37 @@ export default function App() {
             <span className="block text-[10px] uppercase font-black text-gray-500 tracking-[0.2em] mb-3">Motor Quantitativo (Auto-Tuning)</span>
             <div className="space-y-2">
               {data.strategiesStatus.map((strat: any) => (
-                <div key={strat.id} className="flex justify-between items-center bg-black/40 p-2.5 rounded-lg
+                <div key={strat.id} className="flex justify-between items-center bg-black/40 p-2.5 rounded-lg border border-gray-800/50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-gray-300 tracking-wide">{strat.name}</span>
+                    <span className="text-[9px] text-gray-600 font-mono">WR: {strat.winRate}%</span>
+                  </div>
+                  {strat.isHot ? (
+                    <span className="text-green-400 bg-green-900/20 border border-green-500/30 px-2 py-1 rounded text-[9px] uppercase tracking-widest flex items-center gap-1.5 shadow-[0_0_10px_rgba(34,197,94,0.1)]">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Operando
+                    </span>
+                  ) : (
+                    <span className="text-orange-400 bg-orange-900/20 border border-orange-500/30 px-2 py-1 rounded text-[9px] uppercase tracking-widest flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> Cooldown
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <SignalsAlertPanel signals={data.session.signals} />
+        <SpinTimeline spins={data.session.spins} />
+      </div>
+      
+      <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
+        <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
+        <div className="space-y-6">
+          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
+          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
