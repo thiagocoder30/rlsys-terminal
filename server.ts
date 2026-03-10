@@ -73,7 +73,6 @@ async function startServer() {
       const count = await prisma.session.count();
       res.json({ status: "ok", database: "Conectado", sessions: count });
     } catch (error: any) { 
-      console.error("[HEALTH ERROR]:", error);
       res.status(500).json({ status: "error", details: error.message }); 
     }
   });
@@ -84,7 +83,6 @@ async function startServer() {
       const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, status: "ACTIVE" } });
       res.json(session);
     } catch (error: any) { 
-      console.error("[SESSION START ERROR]:", error);
       res.status(500).json({ error: error.message }); 
     }
   });
@@ -98,12 +96,10 @@ async function startServer() {
       });
       res.json(session);
     } catch (error: any) { 
-      console.error("[KILL SWITCH ERROR]:", error);
       res.status(500).json({ error: error.message }); 
     }
   });
 
-  // --- ROTA DE OCR COM CONVERSÃO DE TIPOS BLINDADA ---
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
     const { id } = req.params;
     const { numbers } = req.body; 
@@ -143,7 +139,6 @@ async function startServer() {
           created_at: new Date(now + index), 
           color: props.color,
           parity: props.parity,
-          // CONVERSÃO DE TIPO OBRIGATÓRIA PARA O PRISMA
           dozen: String(props.dozen),
           column: String(props.column),
           half: String(props.half)
@@ -160,14 +155,11 @@ async function startServer() {
 
       res.json({ count: totalToInsert, extractedCount: totalExtractedFromIA, numbers: newNumbersToInsert });
     } catch (error: any) { 
-      console.error("===============================");
       console.error("[FATAL ERROR - OCR SYNC]:", error);
-      console.error("===============================");
       res.status(500).json({ error: error.message || "Erro interno no Backend." }); 
     }
   });
 
-  // --- ROTA MANUAL COM CONVERSÃO DE TIPOS BLINDADA ---
   app.post("/api/sessions/:id/spins", validateUUID, async (req: any, res: any) => {
     try {
       const { id } = req.params;
@@ -186,7 +178,6 @@ async function startServer() {
           number, 
           color: props.color,
           parity: props.parity,
-          // CONVERSÃO DE TIPO OBRIGATÓRIA PARA O PRISMA
           dozen: String(props.dozen),
           column: String(props.column),
           half: String(props.half)
@@ -201,11 +192,11 @@ async function startServer() {
 
       res.json(spin);
     } catch (error: any) { 
-      console.error("[SPIN INSERT ERROR]:", error);
       res.status(500).json({ error: error.message }); 
     }
   });
 
+  // --- ROTA DE DASHBOARD ATUALIZADA (AGORA ENVIA AS ESTRATÉGIAS PARA A TELA) ---
   app.get("/api/sessions/:id/dashboard", validateUUID, async (req, res) => {
     try {
       const session = await prisma.session.findUnique({
@@ -213,10 +204,20 @@ async function startServer() {
         include: { spins: { orderBy: { created_at: "desc" }, take: 100 }, signals: { orderBy: { created_at: "desc" }, take: 50, include: { strategy: true } } },
       });
       if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+      
       const zScore = MathEngine.calculateZScore(session.spins);
-      res.json({ session, zScore });
+      
+      // Avalia a temperatura de cada estratégia no milissegundo atual
+      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      const historyNumbers = session.spins.map(s => s.number);
+      const strategiesStatus = activeStrategies.map(st => ({
+        id: st.id,
+        name: st.name,
+        isHot: StrategyOrchestrator.evaluateStrategyHeat(historyNumbers, st.name)
+      }));
+
+      res.json({ session, zScore, strategiesStatus });
     } catch (error: any) { 
-      console.error("[DASHBOARD ERROR]:", error);
       res.status(500).json({ error: error.message }); 
     }
   });
@@ -236,3 +237,4 @@ async function startServer() {
 }
 
 startServer();
+  
