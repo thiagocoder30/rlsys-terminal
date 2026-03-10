@@ -1,116 +1,107 @@
-import { RaceTrackStrategies } from "./RaceTrackStrategies";
+import { PrismaClient, Strategy } from "@prisma/client";
 
-/**
- * RL.sys - Strategy Orchestrator
- * Arquiteto de Software Financeiro & Data Scientist
- * 
- * Centraliza a inteligência probabilística e orquestra a execução de múltiplas estratégias.
- */
-
-export interface StrategyResult {
-  strategyId: string;
-  strategyName: string;
-  score: number;
-  targetBet: string;
-  confidence: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-}
+const prisma = new PrismaClient();
 
 export class StrategyOrchestrator {
-  // --- DEFINIÇÕES DE COBERTURA (Arrays Exatos Obrigatórios) ---
-  
-  static readonly FUSION_COVERAGE = [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26];
-  static readonly JAMES_BOND_COVERAGE = [0, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36];
-  static readonly VIZINHOS_1_21_COVERAGE = RaceTrackStrategies.COVERAGE_SET_26;
+  // --- MOTOR DE AUTO-TUNING (O PILOTO AUTOMÁTICO) ---
+  // Avalia se uma estratégia merece estar ligada baseado no humor atual da mesa
+  private static evaluateStrategyHeat(history: number[], strategyName: string): boolean {
+    if (history.length < 20) return true; // Se tem pouco dado, deixa ligado por padrão
 
-  static getCoverage(strategyName: string): number[] {
-    if (strategyName.includes("Fusion")) return this.FUSION_COVERAGE;
-    if (strategyName.includes("James Bond")) return this.JAMES_BOND_COVERAGE;
-    if (strategyName.includes("Vizinhos 1 & 21")) return this.VIZINHOS_1_21_COVERAGE;
-    return [];
+    const recentHistory = history.slice(0, 20); // Analisa apenas a "respiração" recente da mesa
+    let hits = 0;
+
+    // Regras de simulação mental do sistema
+    recentHistory.forEach((num) => {
+      if (strategyName.includes("Vizinhos") && this.isVizinhança(num)) hits++;
+      if (strategyName.includes("James Bond") && this.isJamesBond(num)) hits++;
+      // Adicione outras validações conforme criar novas estratégias
+    });
+
+    const winRate = (hits / recentHistory.length) * 100;
+
+    // Se a estratégia estiver acertando menos de 25% na janela curta, a mesa está em tendência contrária.
+    // O sistema DESLIGA a estratégia automaticamente (retorna false).
+    if (winRate < 25) {
+      console.log(`[AUTO-TUNING] 📉 Estratégia '${strategyName}' suspensa (WinRate: ${winRate}%). Mesa desfavorável.`);
+      return false; 
+    }
+
+    console.log(`[AUTO-TUNING] 📈 Estratégia '${strategyName}' ativa (WinRate: ${winRate}%).`);
+    return true;
   }
 
-  static getTargetBet(strategyName: string): string {
-    if (strategyName.includes("Fusion")) return "FUSION_ZONE";
-    if (strategyName.includes("James Bond")) return "JAMES_BOND_SET";
-    if (strategyName.includes("Vizinhos 1 & 21")) return "CUSTOM_SECTOR_1_21";
-    return "STRAIGHT_UP";
+  // --- REGRAS MATEMÁTICAS ---
+  private static isVizinhança(num: number): boolean {
+    const vizinhosZero = [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25];
+    return vizinhosZero.includes(num);
   }
 
-  /**
-   * Analisa o mercado e retorna a melhor oportunidade estatística.
-   * 
-   * @param recentSpins Histórico de giros (Antigo -> Novo)
-   * @param activeStrategies Estratégias vindas do banco de dados (com bayes_weight)
-   */
-  static analyzeMarket(recentSpins: number[], activeStrategies: any[]): StrategyResult | null {
-    if (recentSpins.length < 10) return null;
+  private static isJamesBond(num: number): boolean {
+    // Exemplo clássico: Maioria dos números altos + 0
+    return (num >= 13 && num <= 36) || num === 0;
+  }
 
-    const evaluations: StrategyResult[] = [];
-    const THRESHOLD_CRITICAL = 75;
+  // --- O CORAÇÃO DO RADAR ---
+  public static async analyzeMarket(spinNumbersTimeline: number[], activeStrategies: Strategy[]) {
+    if (spinNumbersTimeline.length < 5) return; // Precisa de um mínimo de giros para respirar
+
+    const latestNumber = spinNumbersTimeline[0];
+    const session = await prisma.session.findFirst({ where: { status: "ACTIVE" } });
+    if (!session) return;
 
     for (const strategy of activeStrategies) {
-      const coverage = this.getCoverage(strategy.name);
-      if (coverage.length === 0) continue;
-
-      // 1. CÁLCULO DE HIT/MISS (Janela Micro e Macro)
-      const lastTen = recentSpins.slice(-10);
-      const lastTwenty = recentSpins.slice(-20);
+      // 1. O FILTRO DO PILOTO AUTOMÁTICO
+      // O sistema decide sozinho se essa estratégia vale a pena no momento
+      const isHot = this.evaluateStrategyHeat(spinNumbersTimeline, strategy.name);
       
-      const hitsTen = lastTen.filter(n => coverage.includes(n)).length;
-      const hitsTwenty = lastTwenty.filter(n => coverage.includes(n)).length;
-      
-      const hitRateTen = (hitsTen / 10);
-      const hitRateTwenty = (hitsTwenty / 20);
+      if (!isHot) continue; // Pula essa estratégia, ela foi desligada pelo sistema
 
-      // 2. SCORE DE ANOMALIA (Z-Score Simplificado / Regressão à Média)
-      // Contamos perdas consecutivas imediatas
-      let consecutiveLosses = 0;
-      for (let i = recentSpins.length - 1; i >= 0; i--) {
-        if (!coverage.includes(recentSpins[i])) {
-          consecutiveLosses++;
-        } else {
-          break;
+      // 2. LÓGICA DE DETECÇÃO DE PADRÕES (Gatilhos)
+      let triggerSignal = false;
+      let targetBet = "";
+
+      // Exemplo de Gatilho: Se a mesa está quente para Vizinhos e deu um número "gatilho"
+      if (strategy.name.includes("Vizinhos")) {
+        // Lógica fictícia de exemplo: se os últimos 2 números NÃO foram vizinhos, a probabilidade aumenta (Reversão à média)
+        const last1 = spinNumbersTimeline[0];
+        const last2 = spinNumbersTimeline[1];
+        if (!this.isVizinhança(last1) && !this.isVizinhança(last2)) {
+          triggerSignal = true;
+          targetBet = "CUSTOM_SECTOR_1_21"; // Setor dos vizinhos
         }
       }
 
-      let anomalyScore = 0;
-      if (consecutiveLosses === 1) anomalyScore = 20;
-      if (consecutiveLosses === 2) anomalyScore = 60;
-      if (consecutiveLosses >= 3) anomalyScore = 100;
+      if (strategy.name.includes("James Bond")) {
+        // Se vieram 3 números baixos seguidos, aciona o James Bond (que cobre os altos)
+        const baixos = spinNumbersTimeline.slice(0, 3).filter(n => n >= 1 && n <= 12).length;
+        if (baixos === 3) {
+          triggerSignal = true;
+          targetBet = "JAMES_BOND_SET";
+        }
+      }
 
-      // Se a taxa de acerto recente está muito abaixo da teórica, aumentamos o score
-      const theoreticalProb = coverage.length / 37;
-      const deviation = theoreticalProb - hitRateTwenty;
-      const deviationScore = Math.max(0, deviation * 100);
+      // 3. DISPARO PARA O BANCO DE DADOS (E TELA)
+      if (triggerSignal) {
+        // Verifica se já não existe um sinal PENDING para não flodar o banco
+        const existingSignal = await prisma.signal.findFirst({
+          where: { session_id: session.id, strategy_id: strategy.id, result: "PENDING" }
+        });
 
-      // 3. FILTRO BAYESIANO
-      // O peso bayesiano (0.1 a 1.0) modula a confiança baseada no histórico de acertos da estratégia
-      const rawScore = (anomalyScore * 0.7) + (deviationScore * 0.3);
-      const finalScore = rawScore * (strategy.bayes_weight || 0.5) * 2; // Normalizado para escala ~100
-
-      // 4. DETERMINAÇÃO DE CONFIANÇA
-      let confidence: StrategyResult["confidence"] = "LOW";
-      if (finalScore > 40) confidence = "MEDIUM";
-      if (finalScore > 65) confidence = "HIGH";
-      if (finalScore > THRESHOLD_CRITICAL) confidence = "CRITICAL";
-
-      evaluations.push({
-        strategyId: strategy.id,
-        strategyName: strategy.name,
-        score: finalScore,
-        targetBet: this.getTargetBet(strategy.name),
-        confidence
-      });
+        if (!existingSignal) {
+          await prisma.signal.create({
+            data: {
+              session_id: session.id,
+              strategy_id: strategy.id,
+              target_bet: targetBet,
+              suggested_amount: (session.current_bankroll * 0.01), // Gestão de Risco: 1% da banca
+              result: "PENDING"
+            }
+          });
+          console.log(`[RADAR] 🎯 Alvo Detectado via Auto-Tuning: ${strategy.name} -> ${targetBet}`);
+        }
+      }
     }
-
-    // Retornar a estratégia com maior pontuação
-    if (evaluations.length === 0) return null;
-
-    const winner = evaluations.reduce((prev, current) => (prev.score > current.score) ? prev : current);
-
-    // Só sugerimos se houver confiança mínima (Threshold de Mercado)
-    if (winner.score < 50) return null;
-
-    return winner;
   }
-}
+  }
+          
