@@ -1,11 +1,11 @@
-import { PrismaClient, Strategy } from "@prisma/client";
+import { PrismaClient, Strategy, Session } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 export class StrategyOrchestrator {
-  // --- MOTOR DE AUTO-TUNING (Obrigatoriamente PUBLIC para a interface ler) ---
-  public static evaluateStrategyHeat(history: number[], strategyName: string): boolean {
-    if (history.length < 20) return true; 
+  
+  public static evaluateStrategyHeat(history: number[], strategyName: string): number {
+    if (history.length < 20) return 50.0; 
 
     const recentHistory = history.slice(0, 20); 
     let hits = 0;
@@ -15,15 +15,25 @@ export class StrategyOrchestrator {
       if (strategyName.includes("James Bond") && this.isJamesBond(num)) hits++;
     });
 
-    const winRate = (hits / recentHistory.length) * 100;
+    return (hits / recentHistory.length) * 100;
+  }
 
-    if (winRate < 25) {
-      console.log(`[AUTO-TUNING] 📉 Estratégia '${strategyName}' suspensa (WinRate: ${winRate}%).`);
-      return false; 
-    }
+  // --- MOTOR DE GESTÃO DE RISCO (KELLY CRITERION FRACIONADO) ---
+  private static calculateSafeBet(winRatePct: number, payoutRatio: number, bankroll: number, minChip: number): number {
+    const w = winRatePct / 100; 
+    
+    let kellyFraction = w - ((1 - w) / payoutRatio);
 
-    console.log(`[AUTO-TUNING] 📈 Estratégia '${strategyName}' ativa (WinRate: ${winRate}%).`);
-    return true;
+    if (kellyFraction <= 0) return minChip; 
+
+    const safeFraction = kellyFraction / 4;
+
+    const finalFraction = Math.min(safeFraction, 0.03);
+
+    const rawBet = bankroll * finalFraction;
+
+    const steps = Math.max(1, Math.round(rawBet / minChip));
+    return steps * minChip;
   }
 
   private static isVizinhança(num: number): boolean {
@@ -35,19 +45,17 @@ export class StrategyOrchestrator {
     return (num >= 13 && num <= 36) || num === 0;
   }
 
-  public static async analyzeMarket(spinNumbersTimeline: number[], activeStrategies: Strategy[]) {
+  public static async analyzeMarket(spinNumbersTimeline: number[], activeStrategies: Strategy[], session: Session) {
     if (spinNumbersTimeline.length < 5) return; 
 
-    const session = await prisma.session.findFirst({ where: { status: "ACTIVE" } });
-    if (!session) return;
-
     for (const strategy of activeStrategies) {
-      const isHot = this.evaluateStrategyHeat(spinNumbersTimeline, strategy.name);
+      const winRate = this.evaluateStrategyHeat(spinNumbersTimeline, strategy.name);
       
-      if (!isHot) continue; 
+      if (winRate < 25) continue; 
 
       let triggerSignal = false;
       let targetBet = "";
+      let payoutRatio = 1.0; 
 
       if (strategy.name.includes("Vizinhos")) {
         const last1 = spinNumbersTimeline[0];
@@ -55,6 +63,7 @@ export class StrategyOrchestrator {
         if (!this.isVizinhança(last1) && !this.isVizinhança(last2)) {
           triggerSignal = true;
           targetBet = "CUSTOM_SECTOR_1_21"; 
+          payoutRatio = 1.12; 
         }
       }
 
@@ -63,6 +72,7 @@ export class StrategyOrchestrator {
         if (baixos === 3) {
           triggerSignal = true;
           targetBet = "JAMES_BOND_SET";
+          payoutRatio = 0.44; 
         }
       }
 
@@ -72,18 +82,20 @@ export class StrategyOrchestrator {
         });
 
         if (!existingSignal) {
+          const suggestedAmount = this.calculateSafeBet(winRate, payoutRatio, session.current_bankroll, session.min_chip);
+
           await prisma.signal.create({
             data: {
               session_id: session.id,
               strategy_id: strategy.id,
               target_bet: targetBet,
-              suggested_amount: (session.current_bankroll * 0.01), 
+              suggested_amount: suggestedAmount,
               result: "PENDING"
             }
           });
+          console.log(`[RISK MANAGEMENT] Kelly sugeriu R$ ${suggestedAmount.toFixed(2)} para ${strategy.name}`);
         }
       }
     }
   }
-                          }
-      
+      }
