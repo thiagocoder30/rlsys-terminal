@@ -75,6 +75,41 @@ async function startServer() {
     } catch (error: any) { res.status(500).json({ status: "error", details: error.message }); }
   });
 
+  // --- NOVA ROTA: MACRO DASHBOARD INSTITUCIONAL ---
+  app.get("/api/macro", async (req, res) => {
+    try {
+      const closedSessions = await prisma.session.findMany({
+        where: { status: "CLOSED" },
+        orderBy: { closed_at: "desc" },
+        take: 50 // Limite de histórico para não pesar a query
+      });
+
+      let totalProfit = 0;
+      let winningSessions = 0;
+
+      closedSessions.forEach(s => {
+        const profit = s.current_bankroll - s.initial_bankroll;
+        totalProfit += profit;
+        if (profit > 0) winningSessions++;
+      });
+
+      const winRate = closedSessions.length > 0 
+        ? ((winningSessions / closedSessions.length) * 100).toFixed(1) 
+        : "0.0";
+
+      res.json({
+        totalProfit,
+        winRate,
+        totalSessions: closedSessions.length,
+        sessions: closedSessions
+      });
+    } catch (error: any) { 
+      console.error("[MACRO ERROR]:", error);
+      res.status(500).json({ error: error.message }); 
+    }
+  });
+  // ------------------------------------------------
+
   app.post("/api/sessions", async (req, res) => {
     try {
       const { initial_bankroll, min_chip } = req.body;
@@ -198,4 +233,4 @@ async function startServer() {
 }
 
 startServer();
-                                                    
+    
