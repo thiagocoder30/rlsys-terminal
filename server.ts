@@ -72,43 +72,37 @@ async function startServer() {
       await prisma.$connect();
       const count = await prisma.session.count();
       res.json({ status: "ok", database: "Conectado", sessions: count });
-    } catch (error: any) { 
-      res.status(500).json({ status: "error", details: error.message }); 
-    }
+    } catch (error: any) { res.status(500).json({ status: "error", details: error.message }); }
   });
 
   app.post("/api/sessions", async (req, res) => {
     try {
-      const { initial_bankroll } = req.body;
-      const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, status: "ACTIVE" } });
+      const { initial_bankroll, min_chip } = req.body;
+      const session = await prisma.session.create({ 
+        data: { initial_bankroll, current_bankroll: initial_bankroll, min_chip: min_chip || 0.50, status: "ACTIVE" } 
+      });
       res.json(session);
-    } catch (error: any) { 
-      res.status(500).json({ error: error.message }); 
-    }
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   app.post("/api/sessions/:id/close", validateUUID, async (req: any, res: any) => {
     try {
       const { id } = req.params;
-      const session = await prisma.session.update({
-        where: { id },
-        data: { status: "CLOSED", closed_at: new Date() }
-      });
+      const session = await prisma.session.update({ where: { id }, data: { status: "CLOSED", closed_at: new Date() }});
       res.json(session);
-    } catch (error: any) { 
-      res.status(500).json({ error: error.message }); 
-    }
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   app.post("/api/sessions/:id/ocr/sync", validateUUID, async (req: any, res: any) => {
     const { id } = req.params;
     const { numbers } = req.body; 
-
     if (!Array.isArray(numbers)) return res.status(400).json({ error: "Formato inválido." });
-
     const totalExtractedFromIA = numbers.length; 
 
     try {
+      const session = await prisma.session.findUnique({ where: { id } });
+      if (!session) return res.status(404).json({ error: "Sessão não encontrada." });
+
       const lastSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 150 });
       const lastNumbersInDB = lastSpins.map(s => s.number).reverse(); 
       
@@ -125,24 +119,12 @@ async function startServer() {
       }
 
       const totalToInsert = newNumbersToInsert.length;
-
-      if (totalToInsert === 0) {
-        return res.json({ count: 0, extractedCount: totalExtractedFromIA, message: "Histórico já atualizado." });
-      }
+      if (totalToInsert === 0) return res.json({ count: 0, extractedCount: totalExtractedFromIA, message: "Histórico já atualizado." });
 
       const now = Date.now();
       const spinsDataBulk = newNumbersToInsert.map((n, index) => {
         const props = MathEngine.getNumberProps(n);
-        return { 
-          session_id: id, 
-          number: n, 
-          created_at: new Date(now + index), 
-          color: props.color,
-          parity: props.parity,
-          dozen: String(props.dozen),
-          column: String(props.column),
-          half: String(props.half)
-        };
+        return { session_id: id, number: n, created_at: new Date(now + index), color: props.color, parity: props.parity, dozen: String(props.dozen), column: String(props.column), half: String(props.half) };
       });
 
       await prisma.spin.createMany({ data: spinsDataBulk });
@@ -151,13 +133,10 @@ async function startServer() {
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
+      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies, session); 
 
       res.json({ count: totalToInsert, extractedCount: totalExtractedFromIA, numbers: newNumbersToInsert });
-    } catch (error: any) { 
-      console.error("[FATAL ERROR - OCR SYNC]:", error);
-      res.status(500).json({ error: error.message || "Erro interno no Backend." }); 
-    }
+    } catch (error: any) { res.status(500).json({ error: error.message || "Erro interno no Backend." }); }
   });
 
   app.post("/api/sessions/:id/spins", validateUUID, async (req: any, res: any) => {
@@ -172,31 +151,18 @@ async function startServer() {
       if (session.status === "CLOSED") return res.status(400).json({ error: "Sessão já está fechada." });
 
       const props = MathEngine.getNumberProps(number);
-      const spin = await prisma.spin.create({ 
-        data: { 
-          session_id: id, 
-          number, 
-          color: props.color,
-          parity: props.parity,
-          dozen: String(props.dozen),
-          column: String(props.column),
-          half: String(props.half)
-        } 
-      });
+      const spin = await prisma.spin.create({ data: { session_id: id, number, color: props.color, parity: props.parity, dozen: String(props.dozen), column: String(props.column), half: String(props.half) } });
 
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const spinNumbersTimeline = recentSpins.map(s => s.number).reverse();
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies); 
+      StrategyOrchestrator.analyzeMarket(spinNumbersTimeline, activeStrategies, session); 
 
       res.json(spin);
-    } catch (error: any) { 
-      res.status(500).json({ error: error.message }); 
-    }
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
-  // --- ROTA DE DASHBOARD ATUALIZADA (AGORA ENVIA AS ESTRATÉGIAS PARA A TELA) ---
   app.get("/api/sessions/:id/dashboard", validateUUID, async (req, res) => {
     try {
       const session = await prisma.session.findUnique({
@@ -206,20 +172,15 @@ async function startServer() {
       if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
       
       const zScore = MathEngine.calculateZScore(session.spins);
-      
-      // Avalia a temperatura de cada estratégia no milissegundo atual
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       const historyNumbers = session.spins.map(s => s.number);
-      const strategiesStatus = activeStrategies.map(st => ({
-        id: st.id,
-        name: st.name,
-        isHot: StrategyOrchestrator.evaluateStrategyHeat(historyNumbers, st.name)
-      }));
+      const strategiesStatus = activeStrategies.map(st => {
+        const winRate = StrategyOrchestrator.evaluateStrategyHeat(historyNumbers, st.name);
+        return { id: st.id, name: st.name, isHot: winRate >= 25, winRate: winRate.toFixed(0) };
+      });
 
       res.json({ session, zScore, strategiesStatus });
-    } catch (error: any) { 
-      res.status(500).json({ error: error.message }); 
-    }
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
   if (process.env.NODE_ENV !== "production") {
@@ -237,4 +198,4 @@ async function startServer() {
 }
 
 startServer();
-  
+                                                    
