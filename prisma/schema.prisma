@@ -47,8 +47,8 @@ model Signal {
   strategy_id      String
   target_bet       String
   suggested_amount Float
-  martingale_step  Int      @default(0) // <-- A COLUNA QUE FALTAVA
-  result           String   @default("PENDING") // PENDING, WIN, LOSS
+  martingale_step  Int      @default(0) 
+  result           String   @default("PENDING") 
   created_at       DateTime @default(now())
   session          Session  @relation(fields: [session_id], references: [id])
   strategy         Strategy @relation(fields: [strategy_id], references: [id])
