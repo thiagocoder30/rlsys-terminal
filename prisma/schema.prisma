@@ -11,7 +11,7 @@ model Session {
   id               String   @id @default(uuid())
   initial_bankroll Float
   current_bankroll Float
-  min_chip         Float    @default(0.50) // NOVO: A ficha mínima da roleta escolhida
+  min_chip         Float    @default(0.50)
   status           String   @default("ACTIVE")
   closed_at        DateTime?
   created_at       DateTime @default(now())
@@ -46,8 +46,9 @@ model Signal {
   session_id       String
   strategy_id      String
   target_bet       String
-  suggested_amount Float    // Agora será calculado dinamicamente por Kelly
-  result           String   @default("PENDING")
+  suggested_amount Float
+  martingale_step  Int      @default(0) // <-- A COLUNA QUE FALTAVA
+  result           String   @default("PENDING") // PENDING, WIN, LOSS
   created_at       DateTime @default(now())
   session          Session  @relation(fields: [session_id], references: [id])
   strategy         Strategy @relation(fields: [strategy_id], references: [id])
