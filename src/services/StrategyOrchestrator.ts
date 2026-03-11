@@ -12,12 +12,6 @@ export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
     "Race: Vizinhos 1 & 21": { payoutRatio: 1.11, coverage: 17, targetBet: "CUSTOM_SECTOR_1_21", checkWin: (num) => [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25].includes(num) },
     "James Bond": { payoutRatio: 0.44, coverage: 25, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
-    "Dúzia 1": { payoutRatio: 2.0, coverage: 12, targetBet: "DOZEN_1", checkWin: (n) => n >= 1 && n <= 12 },
-    "Dúzia 2": { payoutRatio: 2.0, coverage: 12, targetBet: "DOZEN_2", checkWin: (n) => n >= 13 && n <= 24 },
-    "Dúzia 3": { payoutRatio: 2.0, coverage: 12, targetBet: "DOZEN_3", checkWin: (n) => n >= 25 && n <= 36 },
-    "Coluna 1": { payoutRatio: 2.0, coverage: 12, targetBet: "COLUMN_1", checkWin: (n) => n !== 0 && n % 3 === 1 },
-    "Coluna 2": { payoutRatio: 2.0, coverage: 12, targetBet: "COLUMN_2", checkWin: (n) => n !== 0 && n % 3 === 2 },
-    "Coluna 3": { payoutRatio: 2.0, coverage: 12, targetBet: "COLUMN_3", checkWin: (n) => n !== 0 && n % 3 === 0 },
     
     // ESTRATÉGIAS DE COBERTURA CRUZADA (Payout 0.5)
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "COLUNAS_2_E_3", checkWin: (n) => n !== 0 && n % 3 !== 1, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
