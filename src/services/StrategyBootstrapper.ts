@@ -8,7 +8,13 @@ const OFFICIAL_STRATEGIES = [
   { name: "Dúzia 3", bayes_weight: 1.0 },
   { name: "Coluna 1", bayes_weight: 1.0 },
   { name: "Coluna 2", bayes_weight: 1.0 },
-  { name: "Coluna 3", bayes_weight: 1.0 }
+  { name: "Coluna 3", bayes_weight: 1.0 },
+  { name: "Cross: D1 ➔ Col 2 e 3", bayes_weight: 1.0 },
+  { name: "Cross: D2 ➔ Col 1 e 3", bayes_weight: 1.0 },
+  { name: "Cross: D3 ➔ Col 1 e 2", bayes_weight: 1.0 },
+  { name: "Cross: C1 ➔ Duz 2 e 3", bayes_weight: 1.0 },
+  { name: "Cross: C2 ➔ Duz 1 e 3", bayes_weight: 1.0 },
+  { name: "Cross: C3 ➔ Duz 1 e 2", bayes_weight: 1.0 }
 ];
 
 export async function syncStrategiesToDatabase(prisma: PrismaClient) {
