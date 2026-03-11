@@ -19,16 +19,10 @@ export async function syncStrategiesToDatabase(prisma: PrismaClient) {
     for (const strategy of OFFICIAL_STRATEGIES) {
       if (!existingNames.has(strategy.name)) {
         await prisma.strategy.create({
-          data: {
-            name: strategy.name,
-            bayes_weight: strategy.bayes_weight,
-            is_active: true
-          }
+          data: { name: strategy.name, bayes_weight: strategy.bayes_weight, is_active: true }
         });
-        console.log(`[BOOTSTRAP] Arsenal Estatístico Injetado: ${strategy.name}`);
+        console.log(`[BOOTSTRAP] Arsenal Injetado: ${strategy.name}`);
       }
     }
-  } catch (error) {
-    console.error("[BOOTSTRAP ERROR]:", error);
-  }
+  } catch (error) { console.error("[BOOTSTRAP ERROR]:", error); }
 }
