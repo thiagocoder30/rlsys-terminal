@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { HeaderStatus } from "./components/HeaderStatus";
 import { SignalsAlertPanel } from "./components/SignalsAlertPanel";
 import { ZScoreSparkline } from "./components/ZScoreSparkline";
@@ -10,7 +10,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function App() {
   const [currentView, setCurrentView] = useState<"MACRO" | "SETUP" | "ACTIVE">("MACRO");
-  
   const [macroData, setMacroData] = useState<any>(null);
   const [loadingMacro, setLoadingMacro] = useState(true);
 
@@ -22,6 +21,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
 
+  // --- ESTADOS DO PONTO ELETRÔNICO TÁTICO (VOZ) ---
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const spokenSignalsRef = useRef<Set<string>>(new Set());
+
   const [debugInfo, setDebugInfo] = useState<{
     isOpen: boolean; sentImageBase64: string | null; rawAiText: string; filteredNumbers: number[];
   }>({ isOpen: false, sentImageBase64: null, rawAiText: "", filteredNumbers: [] });
@@ -32,11 +35,8 @@ export default function App() {
       const res = await fetch("/api/macro");
       const json = await res.json();
       setMacroData(json);
-    } catch (err) {
-      console.error("Erro macro:", err);
-    } finally {
-      setLoadingMacro(false);
-    }
+    } catch (err) { console.error("Erro macro:", err); } 
+    finally { setLoadingMacro(false); }
   }, []);
 
   useEffect(() => {
@@ -55,6 +55,8 @@ export default function App() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
+      
+      spokenSignalsRef.current.clear(); // Limpa a memória de voz para a nova sessão
       setSessionId(json.id); 
       setCurrentView("ACTIVE"); 
     } catch (err: any) {
@@ -78,12 +80,53 @@ export default function App() {
     if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); }
   }, [sessionId, fetchData]);
 
+  // --- EFEITO DO PONTO ELETRÔNICO (WEB SPEECH API) ---
+  useEffect(() => {
+    if (!data?.session?.signals || !isVoiceEnabled) return;
+
+    const pendingSignals = data.session.signals.filter((s: any) => s.result === "PENDING");
+
+    pendingSignals.forEach((signal: any) => {
+      // Só fala se o sinal ainda não estiver na memória do useRef
+      if (!spokenSignalsRef.current.has(signal.id)) {
+        spokenSignalsRef.current.add(signal.id);
+
+        const formatCurrencyText = (value: number) => {
+          const reais = Math.floor(value);
+          const centavos = Math.round((value - reais) * 100);
+          let text = "";
+          if (reais > 0) text += `${reais} reai${reais !== 1 ? 's' : ''}`;
+          if (reais > 0 && centavos > 0) text += " e ";
+          if (centavos > 0) text += `${centavos} centavo${centavos !== 1 ? 's' : ''}`;
+          return text || "zero reais";
+        };
+
+        const stratName = signal.strategy?.name || "Estratégia detectada";
+        const amountText = formatCurrencyText(signal.suggested_amount);
+        
+        // Frase tática formatada
+        const speechText = `Alvo. ${stratName}. Sugestão: ${amountText}.`;
+
+        const utterance = new SpeechSynthesisUtterance(speechText);
+        utterance.lang = "pt-BR";
+        utterance.rate = 1.15; // Velocidade ligeiramente acelerada (HFT)
+        utterance.pitch = 1.0;
+        
+        window.speechSynthesis.speak(utterance);
+      }
+    });
+  }, [data?.session?.signals, isVoiceEnabled]);
+  // ---------------------------------------------------
+
   const handleCloseSession = async () => {
     if (!sessionId || !window.confirm("ATENÇÃO: Deseja liquidar a sessão e fechar o caixa agora?")) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
       if (!res.ok) throw new Error("Erro ao fechar caixa.");
+      
+      // Desliga a voz ao fechar caixa para evitar falas atrasadas
+      setIsVoiceEnabled(false); 
       fetchData(); 
     } catch (err: any) { alert("Falha: " + err.message); } finally { setLoading(false); }
   };
@@ -166,12 +209,10 @@ export default function App() {
 
   if (currentView === "MACRO") {
     if (loadingMacro) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Carregando Histórico...</div></div>);
-    
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center p-6 select-none overflow-y-auto">
         <h1 className="text-white text-3xl font-black uppercase tracking-tighter mt-8 mb-2">RL.sys</h1>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Painel do Diretor</p>
-
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl mb-6">
           <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-4">Evolução Patrimonial</span>
           <div className="flex justify-between items-end border-b border-gray-800 pb-4 mb-4">
@@ -191,11 +232,9 @@ export default function App() {
             <span className="text-sm font-black text-indigo-400">{macroData.winRate}%</span>
           </div>
         </div>
-
         <button onClick={() => setCurrentView("SETUP")} className="w-full max-w-sm bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg mb-8 transition-all">
           Nova Operação Tática
         </button>
-
         <div className="w-full max-w-sm pb-10">
           <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-4">Relatórios de Batalha Antigos</span>
           <div className="space-y-3">
@@ -228,13 +267,11 @@ export default function App() {
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
         <h1 className="text-white text-3xl font-black uppercase tracking-tighter mb-2">RL.sys</h1>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Terminal Institucional</p>
-        
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl">
           <div className="mb-6 flex justify-between items-center">
             <span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Setup da Mesa</span>
             <button onClick={() => setCurrentView("MACRO")} className="text-indigo-500 hover:text-indigo-400 text-[10px] font-bold uppercase tracking-wider transition-colors">Voltar</button>
           </div>
-
           <div className="mb-6">
             <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Provedor / Ficha Mínima</label>
             <div className="grid grid-cols-2 gap-2">
@@ -242,10 +279,8 @@ export default function App() {
               <button onClick={() => setMinChip(0.10)} className={`py-3 rounded-xl border ${minChip === 0.10 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500 transition-colors'}`}>PRAGMATIC (R$ 0,10)</button>
             </div>
           </div>
-
           <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Banca Atual (R$)</label>
           <input type="number" value={startBankroll} onChange={(e) => setStartBankroll(e.target.value)} className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white text-2xl font-black focus:outline-none focus:border-indigo-500 transition-colors mb-6 text-center" />
-          
           <button onClick={() => initSession()} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg disabled:opacity-50 transition-all">
             {loading ? "Conectando..." : "Iniciar Sessão"}
           </button>
@@ -299,9 +334,23 @@ export default function App() {
           <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
           <span className="text-white font-black tracking-widest uppercase text-xs">RL.sys</span>
         </div>
-        <button onClick={handleCloseSession} disabled={loading} className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[10px] uppercase font-black px-4 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-2">
-          {loading ? "Processando..." : "⏹ Fechar Caixa"}
-        </button>
+        
+        {/* BOTÕES TÁTICOS (VOZ + KILL SWITCH) */}
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setIsVoiceEnabled(!isVoiceEnabled)} 
+            className={`border text-[9px] uppercase font-black px-3 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-1 ${isVoiceEnabled ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-400' : 'bg-gray-900 border-gray-700 text-gray-500'}`}
+          >
+            {isVoiceEnabled ? "🔊 Voz ON" : "🔇 Voz OFF"}
+          </button>
+          <button 
+            onClick={handleCloseSession} 
+            disabled={loading} 
+            className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[9px] uppercase font-black px-3 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-1"
+          >
+            {loading ? "..." : "⏹ Fechar"}
+          </button>
+        </div>
       </div>
 
       <div className="flex-shrink-0 pt-2">
@@ -344,6 +393,34 @@ export default function App() {
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {debugInfo.isOpen && (
+          <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm">
+            <div className="flex justify-between items-center mb-6 mt-4">
+              <h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2>
+              <button onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors">Fechar</button>
+            </div>
+            <div className="space-y-6 pb-20">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada</span>
+                {debugInfo.sentImageBase64 ? (<img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />) : (<p className="text-red-500 text-xs font-mono">Falha na imagem.</p>)}
+              </div>
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua (JSON) da IA</span>
+                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">{debugInfo.rawAiText || "Vazio ou Erro."}</pre>
+              </div>
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2 flex justify-between">
+                  <span>3. Matriz Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
+                  {debugInfo.filteredNumbers.length >= 90 && <span className="text-green-500">✅ SUCESSO TOTAL</span>}
+                </span>
+                <p className="text-green-400 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">{debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
