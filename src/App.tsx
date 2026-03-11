@@ -26,6 +26,7 @@ export default function App() {
   
   const prevSignalsRef = useRef<any[]>([]);
   const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE', data: any, percentToGoal?: number} | null>(null);
+  const [debugInfo, setDebugInfo] = useState<{isOpen: boolean; sentImageBase64: string | null; rawAiText: string; filteredNumbers: number[];}>({ isOpen: false, sentImageBase64: null, rawAiText: "", filteredNumbers: [] });
 
   const fetchMacro = useCallback(async () => {
     setLoadingMacro(true);
@@ -100,7 +101,6 @@ export default function App() {
         }
       }
     });
-
     prevSignalsRef.current = currentSignals;
   }, [data, isVoiceEnabled]);
 
@@ -125,6 +125,7 @@ export default function App() {
     if (!sessionId || data?.session?.status === "CLOSED") return;
     setLoading(true);
     let rawTextStr = "", extractedNumbersArray: number[] = [];
+    let debugImageStr = "";
     try {
       const base64Image = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader(); reader.readAsDataURL(file);
@@ -135,7 +136,9 @@ export default function App() {
             if (w > h) { if (w > maxDim) { h *= maxDim / w; w = maxDim; } } else { if (h > maxDim) { w *= maxDim / h; h = maxDim; } }
             canvas.width = w; canvas.height = h; const ctx = canvas.getContext("2d");
             if (ctx) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, w, h); }
-            resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
+            const finalBase64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+            debugImageStr = `data:image/jpeg;base64,${finalBase64}`;
+            resolve(finalBase64);
           }; img.onerror = reject;
         }; reader.onerror = reject;
       });
@@ -154,10 +157,14 @@ export default function App() {
         const jsonObj = JSON.parse(rawTextStr); extractedNumbersArray = [...(jsonObj.top_row || []), ...(jsonObj.grid_row_1 || []), ...(jsonObj.grid_row_2 || []), ...(jsonObj.grid_row_3 || []), ...(jsonObj.grid_row_4 || []), ...(jsonObj.grid_row_5 || []), ...(jsonObj.grid_row_6 || []), ...(jsonObj.grid_row_7 || []), ...(jsonObj.grid_row_8 || []), ...(jsonObj.grid_row_9_bottom || [])];
       } catch (parseError) { extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n)); }
       const numbers = [...extractedNumbersArray].reverse();
+      setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr, filteredNumbers: extractedNumbersArray });
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
       const res = await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers }) });
       if (!res.ok) throw new Error("Falha OCR backend."); fetchData();
-    } catch (err: any) { alert("Erro OCR: " + err.message); } finally { setLoading(false); }
+    } catch (err: any) { 
+      alert("Erro OCR: " + err.message); 
+      setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr || "FALHA", filteredNumbers: extractedNumbersArray });
+    } finally { setLoading(false); }
   };
 
   if (currentView === "MACRO") {
@@ -236,8 +243,42 @@ export default function App() {
       
       <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 mt-4 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
-        <ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} />
+        <div className="space-y-6">
+          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
+          
+          {/* BOTÃO OCR RESTAURADO */}
+          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
+        </div>
       </motion.div>
+
+      {/* RAIO-X DEBUG MODAL */}
+      <AnimatePresence>
+        {debugInfo.isOpen && (
+          <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm">
+            <div className="flex justify-between items-center mb-6 mt-4">
+              <h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2>
+              <button onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors">Fechar</button>
+            </div>
+            <div className="space-y-6 pb-20">
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada enviada</span>
+                {debugInfo.sentImageBase64 ? (<img src={debugInfo.sentImageBase64} alt="Enviado" className="w-full rounded border border-gray-700 opacity-80" />) : (<p className="text-red-500 text-xs font-mono">Falha na imagem.</p>)}
+              </div>
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua (JSON) da IA</span>
+                <pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">{debugInfo.rawAiText || "Vazio ou Erro."}</pre>
+              </div>
+              <div className="bg-black border border-gray-800 rounded-xl p-4">
+                <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2 flex justify-between">
+                  <span>3. Matriz Extraída ({debugInfo.filteredNumbers.length} lidos)</span>
+                  {debugInfo.filteredNumbers.length >= 90 && <span className="text-green-500">✅ SUCESSO TOTAL</span>}
+                </span>
+                <p className="text-green-400 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">{debugInfo.filteredNumbers.length > 0 ? debugInfo.filteredNumbers.join(", ") : "Nenhum número extraído"}</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {activeModal && (
