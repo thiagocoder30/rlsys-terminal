@@ -23,6 +23,9 @@ export default function App() {
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const spokenSignalsRef = useRef<Set<string>>(new Set());
+  
+  const prevSignalsRef = useRef<any[]>([]);
+  const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE', data: any, percentToGoal?: number} | null>(null);
 
   const fetchMacro = useCallback(async () => {
     setLoadingMacro(true);
@@ -40,7 +43,7 @@ export default function App() {
       const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initial_bankroll, min_chip: minChip }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
-      spokenSignalsRef.current.clear(); setSessionId(json.id); setCurrentView("ACTIVE"); 
+      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setCurrentView("ACTIVE"); 
     } catch (err: any) {
       if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else setError(err.message || "Erro de conexão.");
     } finally { setLoading(false); }
@@ -58,22 +61,48 @@ export default function App() {
   useEffect(() => { if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, fetchData]);
 
   useEffect(() => {
-    if (!data?.session?.signals || !isVoiceEnabled) return;
-    const pendingSignals = data.session.signals.filter((s: any) => s.result === "PENDING");
-    pendingSignals.forEach((signal: any) => {
-      if (!spokenSignalsRef.current.has(signal.id)) {
-        spokenSignalsRef.current.add(signal.id);
-        const formatCurrencyText = (value: number) => {
-          const reais = Math.floor(value); const centavos = Math.round((value - reais) * 100); let text = "";
-          if (reais > 0) text += `${reais} reai${reais !== 1 ? 's' : ''}`; if (reais > 0 && centavos > 0) text += " e ";
-          if (centavos > 0) text += `${centavos} centavo${centavos !== 1 ? 's' : ''}`; return text || "zero reais";
-        };
-        const stratName = signal.strategy?.name || "Estratégia detectada";
-        const utterance = new SpeechSynthesisUtterance(`Alvo. ${stratName}. Sugestão: ${formatCurrencyText(signal.suggested_amount)}.`);
-        utterance.lang = "pt-BR"; utterance.rate = 1.15; window.speechSynthesis.speak(utterance);
+    if (!data?.session?.signals) return;
+    const currentSignals = data.session.signals;
+    
+    if (isVoiceEnabled) {
+      const pendingSignals = currentSignals.filter((s: any) => s.result === "PENDING");
+      pendingSignals.forEach((signal: any) => {
+        if (!spokenSignalsRef.current.has(signal.id)) {
+          spokenSignalsRef.current.add(signal.id);
+          const reais = Math.floor(signal.suggested_amount); const centavos = Math.round((signal.suggested_amount - reais) * 100); 
+          let text = reais > 0 ? `${reais} reai${reais !== 1 ? 's' : ''}` : "";
+          if (reais > 0 && centavos > 0) text += " e ";
+          if (centavos > 0) text += `${centavos} centavo${centavos !== 1 ? 's' : ''}`;
+          if (!text) text = "zero reais";
+          const utterance = new SpeechSynthesisUtterance(`Alvo. ${signal.strategy?.name}. Aposta sugerida: ${text}.`);
+          utterance.lang = "pt-BR"; utterance.rate = 1.15; window.speechSynthesis.speak(utterance);
+        }
+      });
+    }
+
+    const prevSignals = prevSignalsRef.current;
+    prevSignals.forEach(prevSig => {
+      if (prevSig.result === 'PENDING') {
+        const currSig = currentSignals.find((s:any) => s.id === prevSig.id);
+        if (currSig && currSig.result !== 'PENDING') {
+          if (currSig.result === 'WIN') {
+            const goal = data.session.initial_bankroll * 1.10; 
+            const currentP = data.session.current_bankroll;
+            let pGoal = 0;
+            if (currentP >= goal) pGoal = 100;
+            else if (currentP > data.session.initial_bankroll) pGoal = ((currentP - data.session.initial_bankroll) / (goal - data.session.initial_bankroll)) * 100;
+            setActiveModal({ type: 'GREEN', data: currSig, percentToGoal: pGoal });
+          } else if (currSig.result === 'LOSS') {
+            const galeSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && s.result === 'PENDING' && s.martingale_step > currSig.martingale_step);
+            if (galeSig) { setActiveModal({ type: 'GALE', data: galeSig }); } 
+            else { setActiveModal({ type: 'LOSS', data: currSig }); }
+          }
+        }
       }
     });
-  }, [data?.session?.signals, isVoiceEnabled]);
+
+    prevSignalsRef.current = currentSignals;
+  }, [data, isVoiceEnabled]);
 
   const handleCloseSession = async () => {
     if (!sessionId || !window.confirm("ATENÇÃO: Deseja liquidar a sessão e fechar o caixa agora?")) return;
@@ -140,18 +169,8 @@ export default function App() {
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl mb-6">
           <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-4">Evolução Patrimonial</span>
           <div className="flex justify-between items-end border-b border-gray-800 pb-4 mb-4">
-            <div>
-              <span className="block text-xs font-bold text-gray-400 uppercase">P&L Líquido Global</span>
-              <span className={`text-3xl font-black ${macroData.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>{macroData.totalProfit >= 0 ? '+' : ''}R$ {macroData.totalProfit.toFixed(2)}</span>
-            </div>
-            <div className="text-right">
-              <span className="block text-xs font-bold text-gray-400 uppercase">Operações</span>
-              <span className="text-xl font-bold text-white">{macroData.totalSessions}</span>
-            </div>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-gray-400 uppercase">WinRate Global</span>
-            <span className="text-sm font-black text-indigo-400">{macroData.winRate}%</span>
+            <div><span className="block text-xs font-bold text-gray-400 uppercase">P&L Líquido Global</span><span className={`text-3xl font-black ${macroData.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>{macroData.totalProfit >= 0 ? '+' : ''}R$ {macroData.totalProfit.toFixed(2)}</span></div>
+            <div className="text-right"><span className="block text-xs font-bold text-gray-400 uppercase">Operações</span><span className="text-xl font-bold text-white">{macroData.totalSessions}</span></div>
           </div>
         </div>
         <button onClick={() => setCurrentView("SETUP")} className="w-full max-w-sm bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg mb-8 transition-all">Nova Operação Tática</button>
@@ -165,41 +184,22 @@ export default function App() {
         <h1 className="text-white text-3xl font-black uppercase tracking-tighter mb-2">RL.sys</h1>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Terminal Institucional</p>
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl">
-          <div className="mb-6 flex justify-between items-center">
-            <span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Setup da Mesa</span>
-            <button onClick={() => setCurrentView("MACRO")} className="text-indigo-500 hover:text-indigo-400 text-[10px] font-bold uppercase tracking-wider transition-colors">Voltar</button>
-          </div>
-          <div className="mb-6">
-            <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Provedor / Ficha Mínima</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setMinChip(0.50)} className={`py-3 rounded-xl border ${minChip === 0.50 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500 transition-colors'}`}>EVOLUTION (R$ 0,50)</button>
-              <button onClick={() => setMinChip(0.10)} className={`py-3 rounded-xl border ${minChip === 0.10 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500 transition-colors'}`}>PRAGMATIC (R$ 0,10)</button>
-            </div>
-          </div>
+          <div className="mb-6"><label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Ficha Mínima</label><div className="grid grid-cols-2 gap-2"><button onClick={() => setMinChip(0.50)} className={`py-3 rounded-xl border ${minChip === 0.50 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500'}`}>R$ 0,50</button><button onClick={() => setMinChip(0.10)} className={`py-3 rounded-xl border ${minChip === 0.10 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500'}`}>R$ 0,10</button></div></div>
           <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Banca Atual (R$)</label>
           <input type="number" value={startBankroll} onChange={(e) => setStartBankroll(e.target.value)} className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white text-2xl font-black focus:outline-none focus:border-indigo-500 transition-colors mb-6 text-center" />
-          <button onClick={() => initSession()} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg disabled:opacity-50 transition-all">{loading ? "Conectando..." : "Iniciar Sessão"}</button>
+          <button onClick={() => initSession()} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-all">{loading ? "..." : "Iniciar Sessão"}</button>
         </div>
       </div>
     );
   }
 
-  if (error) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center"><div className="bg-red-500/10 border border-red-500 p-6 rounded-2xl max-w-sm"><h2 className="text-red-500 font-black mb-2">Erro</h2><p className="text-gray-400 text-sm mb-4">{error}</p><button onClick={() => setCurrentView("SETUP")} className="w-full bg-red-600 text-white font-bold py-3 rounded-xl">VOLTAR</button></div></div>);
-  if (!data) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Sincronizando...</div></div>);
-
-  const isClosed = data.session.status === "CLOSED";
-  const profit = data.session.current_bankroll - data.session.initial_bankroll;
-  if (isClosed) {
+  if (data?.session?.status === "CLOSED") {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
-          <div className={`absolute top-0 left-0 w-full h-2 ${profit >= 0 ? 'bg-green-500' : 'bg-red-500'}`} />
-          <h2 className="text-white text-xl font-black uppercase tracking-widest mb-1">Caixa Fechado</h2>
-          <div className="space-y-4 mb-8">
-            <div className="flex justify-between items-center pt-2"><span className="text-gray-400 text-xs font-bold uppercase">Resultado Líquido</span><span className={`block text-2xl font-black ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>{profit >= 0 ? '+' : ''}R$ {profit.toFixed(2)}</span></div>
-          </div>
-          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors">Voltar para o Painel Macro</button>
-        </motion.div>
+        <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
+          <h2 className="text-white text-xl font-black uppercase tracking-widest mb-4">Sessão Encerrada</h2>
+          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-colors">Voltar</button>
+        </div>
       </div>
     );
   }
@@ -215,36 +215,72 @@ export default function App() {
       </div>
 
       <div className="flex-shrink-0 pt-2">
-        <HeaderStatus bankroll={data.session.current_bankroll} initialBankroll={data.session.initial_bankroll} zScore={data.zScore} isConnected={true} />
-        <div className="mt-4"><span className="px-4 text-[10px] uppercase font-bold text-gray-500">Volatilidade Z-Score</span><ZScoreSparkline data={zHistory} /></div>
+        <HeaderStatus bankroll={data?.session?.current_bankroll || 0} initialBankroll={data?.session?.initial_bankroll || 0} zScore={data?.zScore || 0} isConnected={true} />
         
-        {data.strategiesStatus && data.strategiesStatus.length > 0 && (
-          <div className="mt-6 mx-4 bg-gray-900/50 border border-gray-800 rounded-xl p-4 shadow-inner">
+        {data?.strategiesStatus && data.strategiesStatus.length > 0 && (
+          <div className="mt-4 mx-4 bg-gray-900/50 border border-gray-800 rounded-xl p-4 shadow-inner max-h-40 overflow-y-auto">
             <span className="block text-[10px] uppercase font-black text-gray-500 tracking-[0.2em] mb-3">Ranking Quantitativo</span>
             <div className="grid grid-cols-2 gap-2">
               {data.strategiesStatus.map((strat: any) => (
-                <div key={strat.id} className="flex flex-col bg-black/40 p-2.5 rounded-lg border border-gray-800/50">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[10px] font-bold text-gray-300 tracking-wide truncate max-w-[80px]">{strat.name}</span>
-                    <span className={`text-[9px] font-mono ${parseFloat(strat.zScore) <= -0.85 ? 'text-red-400' : 'text-gray-500'}`}>Z: {strat.zScore}</span>
-                  </div>
+                <div key={strat.id} className="flex justify-between items-center bg-black/40 p-2 rounded border border-gray-800/50">
+                  <span className="text-[9px] font-bold text-gray-400 tracking-wide truncate">{strat.name}</span>
+                  <span className={`text-[8px] font-mono ${parseFloat(strat.zScore) <= -0.85 ? 'text-red-400' : 'text-gray-600'}`}>Z: {strat.zScore}</span>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        <SignalsAlertPanel signals={data.session.signals} />
-        <SpinTimeline spins={data.session.spins} />
+        <SignalsAlertPanel signals={data?.session?.signals || []} />
       </div>
       
-      <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
+      <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 mt-4 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
-        <div className="space-y-6">
-          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
-          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
-        </div>
+        <ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} />
       </motion.div>
+
+      <AnimatePresence>
+        {activeModal && (
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
+            {activeModal.type === 'GREEN' && (
+              <div className="bg-green-950 border-2 border-green-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(34,197,94,0.3)]">
+                <div className="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg animate-pulse"><span className="text-4xl">💰</span></div>
+                <h2 className="text-white text-3xl font-black uppercase tracking-widest mb-2">GREEN</h2>
+                <p className="text-green-400 font-bold mb-6">Operação Bem Sucedida!</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-6">
+                  <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Progresso da Meta (+10%)</span>
+                  <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden"><div className="bg-green-500 h-full transition-all" style={{ width: `${Math.min(activeModal.percentToGoal || 0, 100)}%` }} /></div>
+                  <span className="block mt-2 text-white font-mono">{activeModal.percentToGoal?.toFixed(1)}% Concluído</span>
+                </div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Voltar ao Radar</button>
+              </div>
+            )}
+            {activeModal.type === 'GALE' && (
+              <div className="bg-orange-950 border-2 border-orange-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(249,115,22,0.3)]">
+                <div className="w-20 h-20 bg-orange-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">⚠️</span></div>
+                <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Recuperação</h2>
+                <p className="text-orange-400 font-bold text-sm mb-6">Iniciando ciclo de proteção (Gale 1)</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-orange-900/50">
+                  <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Próxima Ficha Calculada</span>
+                  <span className="block text-3xl text-white font-black font-mono mt-1">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span>
+                </div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Executar Proteção</button>
+              </div>
+            )}
+            {activeModal.type === 'LOSS' && (
+              <div className="bg-red-950 border-2 border-red-600 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(220,38,38,0.3)]">
+                <div className="w-20 h-20 bg-red-600 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">🛡️</span></div>
+                <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Stop Ciclo</h2>
+                <p className="text-red-400 font-bold text-sm mb-6">Proteção de Banca Acionada.</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-6">
+                  <span className="block text-sm text-gray-300">Prejuízo assumido de R$ {activeModal.data?.suggested_amount.toFixed(2)}. Aguardando novo ciclo.</span>
+                </div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Ciente</button>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
