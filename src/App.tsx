@@ -191,6 +191,10 @@ export default function App() {
         <h1 className="text-white text-3xl font-black uppercase tracking-tighter mb-2">RL.sys</h1>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Terminal Institucional</p>
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl">
+          <div className="mb-6 flex justify-between items-center">
+            <span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Setup da Mesa</span>
+            <button onClick={() => setCurrentView("MACRO")} className="text-indigo-500 hover:text-indigo-400 text-[10px] font-bold uppercase tracking-wider transition-colors">Voltar</button>
+          </div>
           <div className="mb-6"><label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Ficha Mínima</label><div className="grid grid-cols-2 gap-2"><button onClick={() => setMinChip(0.50)} className={`py-3 rounded-xl border ${minChip === 0.50 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500'}`}>R$ 0,50</button><button onClick={() => setMinChip(0.10)} className={`py-3 rounded-xl border ${minChip === 0.10 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400 font-black' : 'bg-black border-gray-800 text-gray-500'}`}>R$ 0,10</button></div></div>
           <label className="block text-left text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Banca Atual (R$)</label>
           <input type="number" value={startBankroll} onChange={(e) => setStartBankroll(e.target.value)} className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white text-2xl font-black focus:outline-none focus:border-indigo-500 transition-colors mb-6 text-center" />
@@ -246,7 +250,7 @@ export default function App() {
         <div className="space-y-6">
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
           
-          {/* BOTÃO OCR RESTAURADO */}
+          {/* BOTÃO OCR RESTAURADO COM SUCESSO */}
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
@@ -314,7 +318,7 @@ export default function App() {
                 <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Stop Ciclo</h2>
                 <p className="text-red-400 font-bold text-sm mb-6">Proteção de Banca Acionada.</p>
                 <div className="bg-black/50 p-4 rounded-xl mb-6">
-                  <span className="block text-sm text-gray-300">Prejuízo assumido de R$ {activeModal.data?.suggested_amount.toFixed(2)}. Aguardando novo ciclo.</span>
+                  <span className="block text-sm text-gray-300">Prejuízo assumido de R$ {activeModal.data?.suggested_amount.toFixed(2)}. Aguardando novo ciclo estatístico.</span>
                 </div>
                 <button onClick={() => setActiveModal(null)} className="w-full bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Ciente</button>
               </div>
