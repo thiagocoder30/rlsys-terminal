@@ -12,6 +12,7 @@ export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
     "Race: Vizinhos 1 & 21": { payoutRatio: 1.11, coverage: 17, targetBet: "CUSTOM_SECTOR_1_21", checkWin: (num) => [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25].includes(num) },
     "James Bond": { payoutRatio: 0.44, coverage: 25, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
+    "Race: Fusion": { payoutRatio: 1.0, coverage: 18, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 }, // FUSION
     
     // ESTRATÉGIAS DE COBERTURA CRUZADA (Payout 0.5)
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "COLUNAS_2_E_3", checkWin: (n) => n !== 0 && n % 3 !== 1, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
@@ -83,6 +84,7 @@ export class StrategyOrchestrator {
 
     const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
+    // 1. PRIORIDADE MÁXIMA: VERIFICAR GALE (MARTINGALE PENDENTE)
     for (const strategy of activeStrategies) {
       const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
       const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -95,7 +97,7 @@ export class StrategyOrchestrator {
           await prisma.signal.create({
             data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "PENDING" }
           });
-          return; 
+          return; // Trava o radar para forçar a recuperação
         }
       }
     }
@@ -105,8 +107,25 @@ export class StrategyOrchestrator {
 
     let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number }[] = [];
 
+    // 2. BUSCA DE OPORTUNIDADES (Com Sistema de Cooldown Anti-Loop)
     for (const strategy of activeStrategies) {
       const config = this.getConfig(strategy.name);
+      
+      // CHECAGEM DE COOLDOWN: Se deu Win ou Estourou o Gale recentemente, bota pra descansar.
+      const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
+      const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
+      let isOnCooldown = false;
+
+      if (lastSignal && lastSignal.result !== "PENDING") {
+        const spinsSince = await prisma.spin.count({
+          where: { session_id: session.id, created_at: { gt: lastSignal.created_at } }
+        });
+        // Se faz menos de 3 giros desde o último sinal, mantém bloqueado.
+        if (spinsSince < 3) isOnCooldown = true;
+      }
+
+      if (isOnCooldown) continue; // Pula essa estratégia
+
       if (config.canTrigger && !config.canTrigger(spinNumbersTimeline)) continue;
       const zScore = this.calculateSectorZScore(spinNumbersTimeline, config);
       candidates.push({ strategy, config, zScore });
