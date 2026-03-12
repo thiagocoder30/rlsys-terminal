@@ -243,14 +243,15 @@ export default function App() {
         )}
 
         <SignalsAlertPanel signals={data?.session?.signals || []} />
+        
+        {/* A LINHA DO TEMPO FOI RESTAURADA AQUI */}
+        <SpinTimeline spins={data?.session?.spins || []} />
       </div>
       
       <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 mt-4 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
         <div className="space-y-6">
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
-          
-          {/* BOTÃO OCR RESTAURADO COM SUCESSO */}
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
@@ -284,6 +285,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* HUD DE RESULTADOS (MODAIS) */}
       <AnimatePresence>
         {activeModal && (
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
