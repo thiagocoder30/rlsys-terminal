@@ -121,7 +121,8 @@ async function startServer() {
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      if (updatedSession) StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number).reverse(), activeStrategies, updatedSession); 
+      // CORREÇÃO: array mapeado SEM o .reverse() para manter o número mais novo no index 0
+      if (updatedSession) StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession); 
       res.json({ count: newNumbersToInsert.length });
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
@@ -139,7 +140,8 @@ async function startServer() {
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      if (updatedSession) StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number).reverse(), activeStrategies, updatedSession); 
+      // CORREÇÃO CRÍTICA: array mapeado SEM o .reverse() para manter a sincronia temporal
+      if (updatedSession) StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession); 
       res.json(spin);
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
