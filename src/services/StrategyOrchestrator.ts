@@ -3,30 +3,37 @@ import { PrismaClient, Strategy, Session } from "@prisma/client";
 const prisma = new PrismaClient();
 
 interface StrategyConfig {
-  payoutRatio: number; coverage: number; targetBet: string;
+  payoutRatio: number; 
+  coverage: number; 
+  targetBet: string;
+  minChipsRequired: number; // NOVO: Quantas fichas a estratégia exige no tabuleiro
   checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
 }
 
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
-    "Race: Vizinhos 1 & 21": { payoutRatio: 1.11, coverage: 17, targetBet: "CUSTOM_SECTOR_1_21", checkWin: (num) => [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25].includes(num) },
-    "James Bond": { payoutRatio: 0.44, coverage: 25, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
-    "Race: Fusion": { payoutRatio: 1.0, coverage: 18, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
+    // Vizinhos usa no mínimo 5 fichas (1 central + 4 vizinhos)
+    "Race: Vizinhos 1 & 21": { payoutRatio: 1.11, coverage: 17, minChipsRequired: 5, targetBet: "CUSTOM_SECTOR_1_21", checkWin: (num) => [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25].includes(num) },
+    // James Bond exige posições distintas (Alta, Linha, Zero). Mínimo 3 unidades.
+    "James Bond": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 3, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
+    // Fusion é uma aposta seca
+    "Race: Fusion": { payoutRatio: 1.0, coverage: 18, minChipsRequired: 1, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
     
-    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "COLUNAS_2_E_3", checkWin: (n) => n !== 0 && n % 3 !== 1, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
-    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "COLUNAS_1_E_3", checkWin: (n) => n !== 0 && n % 3 !== 2, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
-    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.5, coverage: 24, targetBet: "COLUNAS_1_E_2", checkWin: (n) => n !== 0 && n % 3 !== 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
-    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "DUZIAS_2_E_3", checkWin: (n) => n >= 13 && n <= 36, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
-    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 0.5, coverage: 24, targetBet: "DUZIAS_1_E_3", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36), canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
-    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 0.5, coverage: 24, targetBet: "DUZIAS_1_E_2", checkWin: (n) => n >= 1 && n <= 24, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
+    // ESTRATÉGIAS CRUZADAS (Exigem obrigatoriamente 2 fichas)
+    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_2_E_3", checkWin: (n) => n !== 0 && n % 3 !== 1, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
+    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_1_E_3", checkWin: (n) => n !== 0 && n % 3 !== 2, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
+    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_1_E_2", checkWin: (n) => n !== 0 && n % 3 !== 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
+    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_2_E_3", checkWin: (n) => n >= 13 && n <= 36, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
+    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_1_E_3", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36), canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
+    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_1_E_2", checkWin: (n) => n >= 1 && n <= 24, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
     for (const [key, config] of Object.entries(this.REGISTRY)) {
       if (strategyName.includes(key)) return config;
     }
-    return { payoutRatio: 1.0, coverage: 1, targetBet: "UNKNOWN", checkWin: () => false };
+    return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
   public static calculateSectorZScore(history: number[], config: StrategyConfig): number {
@@ -43,20 +50,30 @@ export class StrategyOrchestrator {
   }
 
   private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
+    const absoluteMinBet = minChip * config.minChipsRequired; // Custos Reais (Físicos) da Mesa
     const theoreticalWinRate = config.coverage / 37; 
     let kellyFraction = theoreticalWinRate - ((1 - theoreticalWinRate) / config.payoutRatio);
     if (kellyFraction <= 0) kellyFraction = 0.01; 
+    
     const safeFraction = kellyFraction / 4; 
     let rawBet = bankroll * Math.min(safeFraction, 0.015); 
-    return Math.max(1, Math.round(rawBet / minChip)) * minChip;
+    
+    let steps = Math.round(rawBet / absoluteMinBet);
+    if (steps < 1) steps = 1;
+    return steps * absoluteMinBet; // Retorna o Múltiplo exato das fichas necessárias
   }
 
-  private static calculateRecoveryBet(previousLoss: number, payoutRatio: number, minChip: number, bankroll: number): number {
-    const targetNetProfit = previousLoss + minChip; 
-    let exactBet = targetNetProfit / payoutRatio;
+  private static calculateRecoveryBet(previousLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
+    const absoluteMinBet = minChip * config.minChipsRequired;
+    const targetNetProfit = previousLoss + absoluteMinBet; // Prejuízo + 1 Aposta Mínima de Lucro
+    
+    let exactBet = targetNetProfit / config.payoutRatio;
     const absoluteMaxBet = bankroll * 0.08; 
     if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    return Math.ceil(exactBet / minChip) * minChip;
+    
+    let steps = Math.ceil(exactBet / absoluteMinBet);
+    if (steps < 1) steps = 1;
+    return steps * absoluteMinBet;
   }
 
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
@@ -90,9 +107,9 @@ export class StrategyOrchestrator {
       
       if (lastSignal && lastSignal.result === "LOSS") {
         const nextStep = lastSignal.martingale_step + 1;
-        if (nextStep === 1) { // Só faz 1 Gale. Se errar, assume o Stop Loss e vai pro Cooldown.
+        if (nextStep === 1) { 
           const config = this.getConfig(strategy.name);
-          const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config.payoutRatio, session.min_chip, session.current_bankroll);
+          const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config, session.min_chip, session.current_bankroll);
           await prisma.signal.create({
             data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "PENDING" }
           });
@@ -104,7 +121,6 @@ export class StrategyOrchestrator {
     const anyPending = allSignals.some(s => s.result === "PENDING");
     if (anyPending) return; 
 
-    // O Ranking de Oportunidades
     let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number }[] = [];
 
     // 2. BUSCA COM "ADAPTIVE REGIME" (APRENDIZADO POR LOSS)
@@ -113,14 +129,11 @@ export class StrategyOrchestrator {
       const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
       const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
 
-      // --- O MOTOR ADAPTATIVO (APRENDIZADO DE MÁQUINA) ---
-      // Como terminou a última tentativa dessa estratégia?
       const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       const isPenalized = lastClosedCycle && lastClosedCycle.result === "LOSS";
 
-      // Se tomou um Loss final recentemente, o Cérebro "aprende" e se torna implacável com ela
-      const requiredCooldown = isPenalized ? 12 : 3; // Tempo de castigo sobe de 3 para 12 rodadas
-      const requiredZScore = isPenalized ? -1.35 : -0.85; // Exigência matemática sobe absurdamente
+      const requiredCooldown = isPenalized ? 12 : 3; 
+      const requiredZScore = isPenalized ? -1.35 : -0.85; 
 
       let isOnCooldown = false;
       if (lastSignal && lastSignal.result !== "PENDING") {
@@ -137,10 +150,7 @@ export class StrategyOrchestrator {
       candidates.push({ strategy, config, zScore, requiredZScore });
     }
 
-    // Filtra apenas as estratégias que superaram sua própria régua adaptativa
     const validCandidates = candidates.filter(c => c.zScore <= c.requiredZScore);
-
-    // Dentre as que passaram, pega a melhor de todas
     validCandidates.sort((a, b) => a.zScore - b.zScore);
     const topCandidate = validCandidates[0]; 
 
@@ -156,8 +166,6 @@ export class StrategyOrchestrator {
           result: "PENDING"
         }
       });
-      console.log(`[ADAPTIVE AI] Alvo Armado: ${topCandidate.strategy.name} (Z: ${topCandidate.zScore.toFixed(2)} | Régua: ${topCandidate.requiredZScore})`);
     }
   }
-                                                                                                                                   }
-                                
+}
