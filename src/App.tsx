@@ -8,6 +8,16 @@ import { OcrButton } from "./components/OcrButton";
 import { motion, AnimatePresence } from "motion/react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// Helper para espelhar o Payout Ratio no Frontend
+const getPayoutRatio = (stratName: string) => {
+  if (!stratName) return 1.0;
+  if (stratName.includes("Vizinhos")) return 1.11;
+  if (stratName.includes("James Bond")) return 0.44;
+  if (stratName.includes("Cross")) return 0.5;
+  if (stratName.includes("Dúzia") || stratName.includes("Coluna")) return 2.0;
+  return 1.0;
+};
+
 export default function App() {
   const [currentView, setCurrentView] = useState<"MACRO" | "SETUP" | "ACTIVE">("MACRO");
   const [macroData, setMacroData] = useState<any>(null);
@@ -25,7 +35,7 @@ export default function App() {
   const spokenSignalsRef = useRef<Set<string>>(new Set());
   
   const prevSignalsRef = useRef<any[]>([]);
-  const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE', data: any, percentToGoal?: number} | null>(null);
+  const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE', data: any, metrics?: any} | null>(null);
   const [debugInfo, setDebugInfo] = useState<{isOpen: boolean; sentImageBase64: string | null; rawAiText: string; filteredNumbers: number[];}>({ isOpen: false, sentImageBase64: null, rawAiText: "", filteredNumbers: [] });
 
   const fetchMacro = useCallback(async () => {
@@ -64,6 +74,8 @@ export default function App() {
   useEffect(() => {
     if (!data?.session?.signals) return;
     const currentSignals = data.session.signals;
+    const initialB = data.session.initial_bankroll;
+    const currentB = data.session.current_bankroll;
     
     if (isVoiceEnabled) {
       const pendingSignals = currentSignals.filter((s: any) => s.result === "PENDING");
@@ -75,7 +87,7 @@ export default function App() {
           if (reais > 0 && centavos > 0) text += " e ";
           if (centavos > 0) text += `${centavos} centavo${centavos !== 1 ? 's' : ''}`;
           if (!text) text = "zero reais";
-          const utterance = new SpeechSynthesisUtterance(`Alvo. ${signal.strategy?.name}. Aposta sugerida: ${text}.`);
+          const utterance = new SpeechSynthesisUtterance(`Alvo. ${signal.strategy?.name}. Aposta total de: ${text}.`);
           utterance.lang = "pt-BR"; utterance.rate = 1.15; window.speechSynthesis.speak(utterance);
         }
       });
@@ -86,17 +98,37 @@ export default function App() {
       if (prevSig.result === 'PENDING') {
         const currSig = currentSignals.find((s:any) => s.id === prevSig.id);
         if (currSig && currSig.result !== 'PENDING') {
+          
           if (currSig.result === 'WIN') {
-            const goal = data.session.initial_bankroll * 1.10; 
-            const currentP = data.session.current_bankroll;
+            const goal = initialB * 1.10; 
             let pGoal = 0;
-            if (currentP >= goal) pGoal = 100;
-            else if (currentP > data.session.initial_bankroll) pGoal = ((currentP - data.session.initial_bankroll) / (goal - data.session.initial_bankroll)) * 100;
-            setActiveModal({ type: 'GREEN', data: currSig, percentToGoal: pGoal });
+            if (currentB >= goal) pGoal = 100;
+            else if (currentB > initialB) pGoal = ((currentB - initialB) / (goal - initialB)) * 100;
+            
+            const payout = getPayoutRatio(currSig.strategy?.name);
+            const profitNet = currSig.suggested_amount * payout;
+
+            setActiveModal({ type: 'GREEN', data: currSig, metrics: { pGoal, profitNet } });
+          
           } else if (currSig.result === 'LOSS') {
             const galeSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && s.result === 'PENDING' && s.martingale_step > currSig.martingale_step);
-            if (galeSig) { setActiveModal({ type: 'GALE', data: galeSig }); } 
-            else { setActiveModal({ type: 'LOSS', data: currSig }); }
+            
+            if (galeSig) { 
+              setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: currSig.suggested_amount } }); 
+            } else { 
+              // Stop Loss consolidado do Ciclo
+              let totalCycleLoss = currSig.suggested_amount;
+              if (currSig.martingale_step === 1) {
+                const prevInitialSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && s.martingale_step === 0 && s.created_at < currSig.created_at);
+                if (prevInitialSig) totalCycleLoss += prevInitialSig.suggested_amount;
+              }
+
+              const maxLossAllowed = initialB * 0.15; // Stop de -15%
+              const currentLossAbsolute = initialB - currentB;
+              const stopLossPercent = currentLossAbsolute > 0 ? (currentLossAbsolute / maxLossAllowed) * 100 : 0;
+
+              setActiveModal({ type: 'LOSS', data: currSig, metrics: { totalCycleLoss, stopLossPercent } }); 
+            }
           }
         }
       }
@@ -242,9 +274,28 @@ export default function App() {
           </div>
         )}
 
-        <SignalsAlertPanel signals={data?.session?.signals || []} />
+        {/* ALERTA DE OPORTUNIDADE (ALTERADO PARA APOSTA TOTAL) */}
+        {data?.session?.signals && data.session.signals.length > 0 && data.session.signals.map((sig: any) => {
+          if (sig.result !== "PENDING") return null;
+          return (
+            <div key={sig.id} className="mt-4 mx-4 relative overflow-hidden border p-4 rounded-xl flex items-center justify-between transition-all bg-red-950/40 border-red-900 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+               <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse" />
+               <div className="flex-1 pl-2">
+                 <div className="flex items-center gap-2 mb-1">
+                   <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-red-900/50 text-red-400">ENTRADA IMEDIATA</span>
+                   {sig.martingale_step > 0 && <span className="text-[9px] font-black uppercase tracking-widest bg-orange-900/50 text-orange-400 px-2 py-0.5 rounded">GALE {sig.martingale_step}</span>}
+                 </div>
+                 <h3 className="text-sm font-black uppercase tracking-wide text-white">{sig.strategy?.name || "Oportunidade"}</h3>
+                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Alvo: {sig.target_bet.replace(/_/g, " ")}</p>
+               </div>
+               <div className="text-right">
+                 <span className="block text-[9px] font-black text-red-500 uppercase tracking-widest mb-1">Aposta Total (R$)</span>
+                 <span className="text-2xl font-black font-mono text-green-400">{sig.suggested_amount.toFixed(2)}</span>
+               </div>
+            </div>
+          );
+        })}
         
-        {/* A LINHA DO TEMPO FOI RESTAURADA AQUI */}
         <SpinTimeline spins={data?.session?.spins || []} />
       </div>
       
@@ -293,11 +344,20 @@ export default function App() {
               <div className="bg-green-950 border-2 border-green-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(34,197,94,0.3)]">
                 <div className="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg animate-pulse"><span className="text-4xl">💰</span></div>
                 <h2 className="text-white text-3xl font-black uppercase tracking-widest mb-2">GREEN</h2>
-                <p className="text-green-400 font-bold mb-6">Operação Bem Sucedida!</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-4 border border-green-900/50">
+                  <div className="flex justify-between items-center mb-2 border-b border-green-900/50 pb-2">
+                    <span className="text-[10px] text-gray-400 uppercase tracking-widest">Aposta Total</span>
+                    <span className="text-sm text-gray-300 font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-green-500 font-black uppercase tracking-widest">Lucro Líquido</span>
+                    <span className="text-xl text-green-400 font-black font-mono">+ R$ {activeModal.metrics?.profitNet?.toFixed(2)}</span>
+                  </div>
+                </div>
                 <div className="bg-black/50 p-4 rounded-xl mb-6">
                   <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Progresso da Meta (+10%)</span>
-                  <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden"><div className="bg-green-500 h-full transition-all" style={{ width: `${Math.min(activeModal.percentToGoal || 0, 100)}%` }} /></div>
-                  <span className="block mt-2 text-white font-mono">{activeModal.percentToGoal?.toFixed(1)}% Concluído</span>
+                  <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden"><div className="bg-green-500 h-full transition-all" style={{ width: `${Math.min(activeModal.metrics?.pGoal || 0, 100)}%` }} /></div>
+                  <span className="block mt-2 text-white font-mono">{activeModal.metrics?.pGoal?.toFixed(1)}% Concluído</span>
                 </div>
                 <button onClick={() => setActiveModal(null)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Voltar ao Radar</button>
               </div>
@@ -306,23 +366,37 @@ export default function App() {
               <div className="bg-orange-950 border-2 border-orange-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(249,115,22,0.3)]">
                 <div className="w-20 h-20 bg-orange-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">⚠️</span></div>
                 <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Recuperação</h2>
-                <p className="text-orange-400 font-bold text-sm mb-6">Iniciando ciclo de proteção (Gale 1)</p>
+                <p className="text-orange-400 font-bold text-sm mb-4">Ação de proteção acionada (Gale 1)</p>
                 <div className="bg-black/50 p-4 rounded-xl mb-6 border border-orange-900/50">
-                  <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Próxima Ficha Calculada</span>
-                  <span className="block text-3xl text-white font-black font-mono mt-1">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span>
+                  <div className="flex justify-between items-center mb-2 border-b border-orange-900/50 pb-2">
+                    <span className="text-[10px] text-gray-400 uppercase tracking-widest">Loss Anterior</span>
+                    <span className="text-sm text-red-400 font-mono">- R$ {activeModal.metrics?.previousLoss?.toFixed(2)}</span>
+                  </div>
+                  <div className="text-center pt-2">
+                    <span className="block text-[10px] text-orange-500 font-black uppercase tracking-widest mb-1">Próxima Aposta Total</span>
+                    <span className="block text-3xl text-white font-black font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span>
+                  </div>
                 </div>
-                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Executar Proteção</button>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Executar Ficha</button>
               </div>
             )}
             {activeModal.type === 'LOSS' && (
               <div className="bg-red-950 border-2 border-red-600 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(220,38,38,0.3)]">
                 <div className="w-20 h-20 bg-red-600 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">🛡️</span></div>
                 <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Stop Ciclo</h2>
-                <p className="text-red-400 font-bold text-sm mb-6">Proteção de Banca Acionada.</p>
-                <div className="bg-black/50 p-4 rounded-xl mb-6">
-                  <span className="block text-sm text-gray-300">Prejuízo assumido de R$ {activeModal.data?.suggested_amount.toFixed(2)}. Aguardando novo ciclo estatístico.</span>
+                <p className="text-red-400 font-bold text-sm mb-4">Drawdown contido pelo sistema.</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-red-900/50">
+                  <div className="flex justify-between items-center mb-2 border-b border-red-900/50 pb-2">
+                    <span className="text-[10px] text-gray-400 uppercase tracking-widest">Prejuízo do Ciclo</span>
+                    <span className="text-xl text-red-500 font-black font-mono">- R$ {activeModal.metrics?.totalCycleLoss?.toFixed(2)}</span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Alerta Global (Stop -15%)</span>
+                    <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden mb-1"><div className="bg-red-500 h-full transition-all" style={{ width: `${Math.min(activeModal.metrics?.stopLossPercent || 0, 100)}%` }} /></div>
+                    <span className="block text-[10px] text-red-400 font-mono text-right">{activeModal.metrics?.stopLossPercent?.toFixed(1)}% Atingido</span>
+                  </div>
                 </div>
-                <button onClick={() => setActiveModal(null)} className="w-full bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Ciente</button>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Aceitar e Rotacionar</button>
               </div>
             )}
           </motion.div>
