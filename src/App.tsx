@@ -10,9 +10,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const getPayoutRatio = (stratName: string) => {
   if (!stratName) return 1.0;
-  if (stratName.includes("Vizinhos")) return 1.11;
+  if (stratName.includes("Vizinhos")) return 0.38; // Ajustado
   if (stratName.includes("James Bond")) return 0.44;
-  if (stratName.includes("Cross")) return 0.5;
+  if (stratName.includes("Cross")) return 0.44; // Ajustado para o peso do Zero
   if (stratName.includes("Dúzia") || stratName.includes("Coluna")) return 2.0;
   return 1.0;
 };
@@ -43,7 +43,16 @@ export default function App() {
     catch (err) { console.error("Erro macro:", err); } finally { setLoadingMacro(false); }
   }, []);
 
-  useEffect(() => { if (currentView === "MACRO") fetchMacro(); }, [currentView, fetchMacro]);
+  // VERIFICAÇÃO DE SESSÃO ATIVA (RECUPERAÇÃO DE CACHE)
+  useEffect(() => { 
+    const activeSession = localStorage.getItem("rlsys_active_session");
+    if (activeSession && currentView === "MACRO") {
+      setSessionId(activeSession);
+      setCurrentView("ACTIVE");
+    } else if (currentView === "MACRO") {
+      fetchMacro(); 
+    }
+  }, [currentView, fetchMacro]);
 
   const initSession = async (retries = 3) => {
     setError(null); setLoading(true);
@@ -53,7 +62,10 @@ export default function App() {
       const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initial_bankroll, min_chip: minChip }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
-      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setCurrentView("ACTIVE"); 
+      
+      localStorage.setItem("rlsys_active_session", json.id); // Salva estado no navegador
+      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; 
+      setSessionId(json.id); setActiveModal(null); setCurrentView("ACTIVE"); 
     } catch (err: any) {
       if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else setError(err.message || "Erro de conexão.");
     } finally { setLoading(false); }
@@ -64,8 +76,18 @@ export default function App() {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/dashboard`);
       if (!res.ok) throw new Error("Falha na sincronização");
-      const json = await res.json(); setData(json); setZHistory((prev) => [...prev.slice(-49), json.zScore]);
-    } catch (err: any) { console.error("Erro dashboard:", err.message); }
+      const json = await res.json(); 
+      if (json.session.status === "CLOSED") {
+        localStorage.removeItem("rlsys_active_session"); // Limpa cache se a sessão morreu no servidor
+      }
+      setData(json); setZHistory((prev) => [...prev.slice(-49), json.zScore]);
+    } catch (err: any) { 
+      console.error("Erro dashboard:", err.message); 
+      if (err.message.includes("Falha")) {
+        localStorage.removeItem("rlsys_active_session");
+        setCurrentView("MACRO");
+      }
+    }
   }, [sessionId]);
 
   useEffect(() => { if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, fetchData]);
@@ -160,6 +182,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
       if (!res.ok) throw new Error("Erro ao fechar caixa.");
+      localStorage.removeItem("rlsys_active_session"); // Limpa o estado da máquina
       setIsVoiceEnabled(false); fetchData(); 
     } catch (err: any) { alert("Falha: " + err.message); } finally { setLoading(false); }
   };
@@ -255,7 +278,7 @@ export default function App() {
             <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Resultado Líquido</span>
             <span className={`block text-3xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span>
           </div>
-          <button onClick={() => window.location.reload()} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-colors">Voltar</button>
+          <button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-colors">Voltar</button>
         </div>
       </div>
     );
@@ -423,7 +446,7 @@ export default function App() {
                     <span className="block text-3xl text-white font-black font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span>
                   </div>
                 </div>
-                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Executar Proteção</button>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Executar Ficha</button>
               </div>
             )}
 
@@ -451,4 +474,3 @@ export default function App() {
     </div>
   );
 }
-
