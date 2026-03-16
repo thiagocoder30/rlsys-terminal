@@ -145,12 +145,15 @@ async function startServer() {
       });
       await prisma.spin.createMany({ data: spinsDataBulk });
 
-      const updatedSession = await prisma.session.findUnique({ where: { id } });
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      // OTIMIZAÇÃO: Promise.all para carregar todas as dependências do Cérebro simultaneamente
+      const [updatedSession, recentSpins, activeStrategies] = await Promise.all([
+        prisma.session.findUnique({ where: { id } }),
+        prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 100 }),
+        prisma.strategy.findMany({ where: { is_active: true } })
+      ]);
       
       if (updatedSession) {
-        await StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession);
+        await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, updatedSession);
       }
       
       res.json({ count: newNumbersToInsert.length });
@@ -169,17 +172,20 @@ async function startServer() {
       await StrategyOrchestrator.resolvePendingSignals(number, id);
       
       const props = MathEngine.getNumberProps(number);
-      const spin = await prisma.spin.create({ data: { session_id: id, number, color: props.color, parity: props.parity, dozen: String(props.dozen), column: String(props.column), half: String(props.half) } });
+      await prisma.spin.create({ data: { session_id: id, number, color: props.color, parity: props.parity, dozen: String(props.dozen), column: String(props.column), half: String(props.half) } });
 
-      const updatedSession = await prisma.session.findUnique({ where: { id } });
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+      // OTIMIZAÇÃO DE PERFORMANCE EXTREMA (Promise.all resolve as chamadas DB em paralelo)
+      const [updatedSession, recentSpins, activeStrategies] = await Promise.all([
+        prisma.session.findUnique({ where: { id } }),
+        prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 100 }), // Limite fixado em 100 para alta velocidade
+        prisma.strategy.findMany({ where: { is_active: true } })
+      ]);
       
       if (updatedSession) {
-        await StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession); 
+        await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, updatedSession); 
       }
       
-      res.json(spin);
+      res.json({ success: true }); // Resposta ultrarrápida
     } catch (error: any) { 
       console.error("[SPIN ERROR]", error.message);
       res.status(500).json({ error: error.message }); 
