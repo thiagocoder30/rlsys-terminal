@@ -3,8 +3,10 @@ import { PrismaClient, Strategy, Session } from "@prisma/client";
 const prisma = new PrismaClient();
 
 interface StrategyConfig {
-  payoutRatio: number; coverage: number; targetBet: string;
-  minChipsRequired: number;
+  payoutRatio: number; 
+  coverage: number; 
+  targetBet: string;
+  minChipsRequired: number; // Múltiplo real da mesa
   checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
 }
@@ -80,11 +82,23 @@ export class StrategyOrchestrator {
       });
 
       await Promise.all(updates); 
+      
+      // TRAILING STOP RECORDER
       if (totalProfitDelta !== 0) {
-        await prisma.session.update({ where: { id: sessionId }, data: { current_bankroll: { increment: totalProfitDelta } }});
+        const session = await prisma.session.findUnique({ where: { id: sessionId } });
+        if (session) {
+          const newBankroll = session.current_bankroll + totalProfitDelta;
+          const currentHigh = session.highest_bankroll && session.highest_bankroll > 0 ? session.highest_bankroll : session.initial_bankroll;
+          const newHighest = Math.max(currentHigh, newBankroll);
+
+          await prisma.session.update({ 
+            where: { id: sessionId }, 
+            data: { current_bankroll: newBankroll, highest_bankroll: newHighest } 
+          });
+        }
       }
     } catch (error: any) {
-      console.error(`[FAIL-SAFE] Erro ao resolver sinais (Micro-corte BD): ${error.message}`);
+      console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`);
     }
   }
 
@@ -160,8 +174,7 @@ export class StrategyOrchestrator {
         });
       }
     } catch (error: any) {
-      console.error(`[FAIL-SAFE] Erro no Motor Quantitativo (Micro-corte BD): ${error.message}`);
+      console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`);
     }
   }
-                                                                                                          }
-                              
+}
