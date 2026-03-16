@@ -3,11 +3,8 @@ import { PrismaClient, Strategy, Session, Spin } from "@prisma/client";
 const prisma = new PrismaClient();
 
 interface StrategyConfig {
-  payoutRatio: number; 
-  coverage: number; 
-  targetBet: string;
-  minChipsRequired: number; 
-  checkWin: (num: number) => boolean;
+  payoutRatio: number; coverage: number; targetBet: string;
+  minChipsRequired: number; checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
 }
 
@@ -32,15 +29,11 @@ export class StrategyOrchestrator {
   }
 
   public static calculateSectorZScore(history: number[], config: StrategyConfig): number {
-    const sample = history.slice(0, 20); 
-    const n = sample.length;
+    const sample = history.slice(0, 20); const n = sample.length;
     if (n < 10) return 0.0; 
-    const p = config.coverage / 37; 
-    const expectedHits = n * p; 
-    const standardDeviation = Math.sqrt(n * p * (1 - p)); 
+    const p = config.coverage / 37; const expectedHits = n * p; const standardDeviation = Math.sqrt(n * p * (1 - p)); 
     if (standardDeviation === 0) return 0.0;
-    let actualHits = 0;
-    sample.forEach(num => { if (config.checkWin(num)) actualHits++; });
+    let actualHits = 0; sample.forEach(num => { if (config.checkWin(num)) actualHits++; });
     return (actualHits - expectedHits) / standardDeviation;
   }
 
@@ -51,8 +44,7 @@ export class StrategyOrchestrator {
     if (kellyFraction <= 0) kellyFraction = 0.01; 
     const safeFraction = kellyFraction / 4; 
     let rawBet = bankroll * Math.min(safeFraction, 0.015); 
-    let steps = Math.round(rawBet / absoluteMinBet);
-    if (steps < 1) steps = 1;
+    let steps = Math.round(rawBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet; 
   }
 
@@ -60,10 +52,8 @@ export class StrategyOrchestrator {
     const absoluteMinBet = minChip * config.minChipsRequired;
     const targetNetProfit = previousLoss + absoluteMinBet; 
     let exactBet = targetNetProfit / config.payoutRatio;
-    const absoluteMaxBet = bankroll * 0.08; 
-    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    let steps = Math.ceil(exactBet / absoluteMinBet);
-    if (steps < 1) steps = 1;
+    const absoluteMaxBet = bankroll * 0.08; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet;
   }
 
@@ -73,35 +63,28 @@ export class StrategyOrchestrator {
       if (pendingSignals.length === 0) return;
 
       let totalProfitDelta = 0;
-      const updates = pendingSignals.map(sig => {
+      
+      // OTIMIZAÇÃO: Remoção do Promise.all. A gravação sequencial evita esgotamento de conexões no Supabase.
+      for (const sig of pendingSignals) {
         const config = this.getConfig(sig.strategy.name);
         const isWin = config.checkWin(newNumber);
         const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
         totalProfitDelta += profitNet;
-        return prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
-      });
+        await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
+      }
 
-      await Promise.all(updates); 
-      
       if (totalProfitDelta !== 0) {
         const session = await prisma.session.findUnique({ where: { id: sessionId } });
         if (session) {
           const newBankroll = session.current_bankroll + totalProfitDelta;
           const currentHigh = session.highest_bankroll && session.highest_bankroll > 0 ? session.highest_bankroll : session.initial_bankroll;
           const newHighest = Math.max(currentHigh, newBankroll);
-
-          await prisma.session.update({ 
-            where: { id: sessionId }, 
-            data: { current_bankroll: newBankroll, highest_bankroll: newHighest } 
-          });
+          await prisma.session.update({ where: { id: sessionId }, data: { current_bankroll: newBankroll, highest_bankroll: newHighest } });
         }
       }
-    } catch (error: any) {
-      console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`);
-    }
+    } catch (error: any) { console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`); }
   }
 
-  // ATENÇÃO: O parâmetro mudou de number[] para Spin[] para acessar o timestamp na memória
   public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
@@ -109,19 +92,15 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // 1. PRIORIDADE MÁXIMA: GALE (RECUPERAÇÃO DE PERDA IMEDIATA)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
-        
         if (lastSignal && lastSignal.result === "LOSS") {
           const nextStep = lastSignal.martingale_step + 1;
           if (nextStep === 1) { 
             const config = this.getConfig(strategy.name);
             const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({
-              data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "PENDING" }
-            });
+            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "PENDING" } });
             return; 
           }
         }
@@ -132,7 +111,6 @@ export class StrategyOrchestrator {
 
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number }[] = [];
 
-      // 2. BUSCA COM "ADAPTIVE REGIME" EM MEMÓRIA RAM (LATÊNCIA ZERO)
       for (const strategy of activeStrategies) {
         const config = this.getConfig(strategy.name);
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
@@ -140,22 +118,17 @@ export class StrategyOrchestrator {
 
         const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
         const isPenalized = lastClosedCycle && lastClosedCycle.result === "LOSS";
-
-        const requiredCooldown = isPenalized ? 12 : 3; 
-        const requiredZScore = isPenalized ? -1.35 : -0.85; 
+        const requiredCooldown = isPenalized ? 12 : 3; const requiredZScore = isPenalized ? -1.35 : -0.85; 
 
         let isOnCooldown = false;
         if (lastSignal && lastSignal.result !== "PENDING") {
-          // OTIMIZAÇÃO: Calculamos a distância usando a array da Memória RAM em vez do Banco de Dados
           const lastSigTime = new Date(lastSignal.created_at).getTime();
           const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
-          
           if (spinsSince < requiredCooldown) isOnCooldown = true;
         }
 
         if (isOnCooldown) continue; 
         if (config.canTrigger && !config.canTrigger(spinNumbersTimeline)) continue;
-        
         const zScore = this.calculateSectorZScore(spinNumbersTimeline, config);
         candidates.push({ strategy, config, zScore, requiredZScore });
       }
@@ -166,19 +139,8 @@ export class StrategyOrchestrator {
 
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
-        await prisma.signal.create({
-          data: {
-            session_id: session.id,
-            strategy_id: topCandidate.strategy.id,
-            target_bet: topCandidate.config.targetBet,
-            suggested_amount: suggestedAmount,
-            martingale_step: 0,
-            result: "PENDING"
-          }
-        });
+        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "PENDING" } });
       }
-    } catch (error: any) {
-      console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`);
-    }
+    } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
 }
