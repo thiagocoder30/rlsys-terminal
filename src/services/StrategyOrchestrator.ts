@@ -10,15 +10,21 @@ interface StrategyConfig {
 
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
-    "Race: Vizinhos 1 & 21": { payoutRatio: 1.11, coverage: 17, minChipsRequired: 5, targetBet: "CUSTOM_SECTOR_1_21", checkWin: (num) => [22, 18, 29, 7, 28, 12, 35, 3, 26, 0, 32, 15, 19, 4, 21, 2, 25].includes(num) },
+    // VIZINHOS 1 e 21: 26 Números de Vitória. Loss nos 11 números específicos informados. (Payout: 10 de lucro para 26 apostados = 0.38)
+    "Race: Vizinhos 1 & 21": { 
+      payoutRatio: 0.38, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", 
+      checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) 
+    },
     "James Bond": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 3, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
     "Race: Fusion": { payoutRatio: 1.0, coverage: 18, minChipsRequired: 1, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
-    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_2_E_3", checkWin: (n) => n !== 0 && n % 3 !== 1, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
-    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_1_E_3", checkWin: (n) => n !== 0 && n % 3 !== 2, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
-    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "COLUNAS_1_E_2", checkWin: (n) => n !== 0 && n % 3 !== 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
-    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_2_E_3", checkWin: (n) => n >= 13 && n <= 36, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
-    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_1_E_3", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36), canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
-    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 0.5, coverage: 24, minChipsRequired: 2, targetBet: "DUZIAS_1_E_2", checkWin: (n) => n >= 1 && n <= 24, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
+    
+    // ESTRATÉGIAS DE COBERTURA CRUZADA + PROTEÇÃO DO ZERO (21 Unidades Base: 10 em cada setor, 1 no Zero. Payout Médio = 0.44)
+    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
+    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
+    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
+    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
+    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
+    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -64,7 +70,6 @@ export class StrategyOrchestrator {
 
       let totalProfitDelta = 0;
       
-      // OTIMIZAÇÃO: Remoção do Promise.all. A gravação sequencial evita esgotamento de conexões no Supabase.
       for (const sig of pendingSignals) {
         const config = this.getConfig(sig.strategy.name);
         const isWin = config.checkWin(newNumber);
