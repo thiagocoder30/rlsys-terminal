@@ -10,15 +10,9 @@ interface StrategyConfig {
 
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
-    // VIZINHOS 1 e 21: 26 Números de Vitória. Loss nos 11 números específicos informados. (Payout: 10 de lucro para 26 apostados = 0.38)
-    "Race: Vizinhos 1 & 21": { 
-      payoutRatio: 0.38, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", 
-      checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) 
-    },
+    "Race: Vizinhos 1 & 21": { payoutRatio: 0.38, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
     "James Bond": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 3, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
     "Race: Fusion": { payoutRatio: 1.0, coverage: 18, minChipsRequired: 1, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
-    
-    // ESTRATÉGIAS DE COBERTURA CRUZADA + PROTEÇÃO DO ZERO (21 Unidades Base: 10 em cada setor, 1 no Zero. Payout Médio = 0.44)
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
     "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
     "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
@@ -65,17 +59,27 @@ export class StrategyOrchestrator {
 
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
-      const pendingSignals = await prisma.signal.findMany({ where: { session_id: sessionId, result: "PENDING" }, include: { strategy: true }});
-      if (pendingSignals.length === 0) return;
+      // Busca Sinais Sugeridos (Aguardando clique) e Pendentes (Aguardando roleta)
+      const activeSignals = await prisma.signal.findMany({ 
+        where: { session_id: sessionId, result: { in: ["PENDING", "SUGGESTED"] } }, 
+        include: { strategy: true }
+      });
+      if (activeSignals.length === 0) return;
 
       let totalProfitDelta = 0;
       
-      for (const sig of pendingSignals) {
-        const config = this.getConfig(sig.strategy.name);
-        const isWin = config.checkWin(newNumber);
-        const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
-        totalProfitDelta += profitNet;
-        await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
+      for (const sig of activeSignals) {
+        if (sig.result === "SUGGESTED") {
+          // A Roda girou e o usuário não confirmou a aposta. Ignora a sugestão e protege o caixa.
+          await prisma.signal.update({ where: { id: sig.id }, data: { result: "MISSED" } });
+        } else if (sig.result === "PENDING") {
+          // Aposta confirmada. Processa o Win/Loss real.
+          const config = this.getConfig(sig.strategy.name);
+          const isWin = config.checkWin(newNumber);
+          const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
+          totalProfitDelta += profitNet;
+          await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
+        }
       }
 
       if (totalProfitDelta !== 0) {
@@ -105,14 +109,15 @@ export class StrategyOrchestrator {
           if (nextStep === 1) { 
             const config = this.getConfig(strategy.name);
             const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "PENDING" } });
+            // O Gale também entra como SUGGESTED exigindo confirmação
+            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
             return; 
           }
         }
       }
 
-      const anyPending = allSignals.some(s => s.result === "PENDING");
-      if (anyPending) return; 
+      const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
+      if (anyActive) return; 
 
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number }[] = [];
 
@@ -126,7 +131,7 @@ export class StrategyOrchestrator {
         const requiredCooldown = isPenalized ? 12 : 3; const requiredZScore = isPenalized ? -1.35 : -0.85; 
 
         let isOnCooldown = false;
-        if (lastSignal && lastSignal.result !== "PENDING") {
+        if (lastSignal && lastSignal.result !== "PENDING" && lastSignal.result !== "SUGGESTED") {
           const lastSigTime = new Date(lastSignal.created_at).getTime();
           const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
           if (spinsSince < requiredCooldown) isOnCooldown = true;
@@ -144,7 +149,8 @@ export class StrategyOrchestrator {
 
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
-        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "PENDING" } });
+        // Cria o sinal exigindo o OK do operador
+        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
