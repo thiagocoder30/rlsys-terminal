@@ -11,6 +11,7 @@ model Session {
   id               String   @id @default(uuid())
   initial_bankroll Float
   current_bankroll Float
+  highest_bankroll Float?   @default(0) // NOVO: Marca D'água do Trailing Stop
   min_chip         Float    @default(0.50)
   status           String   @default("ACTIVE")
   closed_at        DateTime?
