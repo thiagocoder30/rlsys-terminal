@@ -1,4 +1,4 @@
-import { PrismaClient, Strategy, Session } from "@prisma/client";
+import { PrismaClient, Strategy, Session, Spin } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -6,7 +6,7 @@ interface StrategyConfig {
   payoutRatio: number; 
   coverage: number; 
   targetBet: string;
-  minChipsRequired: number; // Múltiplo real da mesa
+  minChipsRequired: number; 
   checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
 }
@@ -83,7 +83,6 @@ export class StrategyOrchestrator {
 
       await Promise.all(updates); 
       
-      // TRAILING STOP RECORDER
       if (totalProfitDelta !== 0) {
         const session = await prisma.session.findUnique({ where: { id: sessionId } });
         if (session) {
@@ -102,12 +101,15 @@ export class StrategyOrchestrator {
     }
   }
 
-  public static async analyzeMarket(spinNumbersTimeline: number[], activeStrategies: Strategy[], session: Session) {
+  // ATENÇÃO: O parâmetro mudou de number[] para Spin[] para acessar o timestamp na memória
+  public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
+      const spinNumbersTimeline = recentSpins.map(s => s.number);
       if (spinNumbersTimeline.length < 10) return; 
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
+      // 1. PRIORIDADE MÁXIMA: GALE (RECUPERAÇÃO DE PERDA IMEDIATA)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -130,6 +132,7 @@ export class StrategyOrchestrator {
 
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number }[] = [];
 
+      // 2. BUSCA COM "ADAPTIVE REGIME" EM MEMÓRIA RAM (LATÊNCIA ZERO)
       for (const strategy of activeStrategies) {
         const config = this.getConfig(strategy.name);
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
@@ -143,9 +146,10 @@ export class StrategyOrchestrator {
 
         let isOnCooldown = false;
         if (lastSignal && lastSignal.result !== "PENDING") {
-          const spinsSince = await prisma.spin.count({
-            where: { session_id: session.id, created_at: { gt: lastSignal.created_at } }
-          });
+          // OTIMIZAÇÃO: Calculamos a distância usando a array da Memória RAM em vez do Banco de Dados
+          const lastSigTime = new Date(lastSignal.created_at).getTime();
+          const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
+          
           if (spinsSince < requiredCooldown) isOnCooldown = true;
         }
 
