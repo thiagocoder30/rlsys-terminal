@@ -93,7 +93,13 @@ async function startServer() {
     try {
       const { initial_bankroll, min_chip } = req.body;
       const session = await prisma.session.create({ 
-        data: { initial_bankroll, current_bankroll: initial_bankroll, min_chip: min_chip || 0.50, status: "ACTIVE" } 
+        data: { 
+          initial_bankroll, 
+          current_bankroll: initial_bankroll, 
+          highest_bankroll: initial_bankroll, 
+          min_chip: min_chip || 0.50, 
+          status: "ACTIVE" 
+        } 
       });
       res.json(session);
     } catch (error: any) { res.status(500).json({ error: error.message }); }
@@ -143,7 +149,6 @@ async function startServer() {
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      // AWAIT obrigatório e REMOÇÃO do .reverse() para manter o alinhamento temporal correto
       if (updatedSession) {
         await StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession);
       }
@@ -170,7 +175,6 @@ async function startServer() {
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 200 });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       
-      // AWAIT obrigatório e REMOÇÃO do .reverse() para manter o alinhamento temporal correto
       if (updatedSession) {
         await StrategyOrchestrator.analyzeMarket(recentSpins.map(s => s.number), activeStrategies, updatedSession); 
       }
