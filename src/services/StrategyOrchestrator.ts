@@ -28,7 +28,6 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
-  // --- MOTOR 1: REGRESSÃO À MÉDIA (Z-SCORE) ---
   public static calculateSectorZScore(history: number[], config: StrategyConfig): number {
     const sample = history.slice(0, 20); const n = sample.length;
     if (n < 10) return 0.0; 
@@ -38,7 +37,6 @@ export class StrategyOrchestrator {
     return (actualHits - expectedHits) / standardDeviation;
   }
 
-  // --- MOTOR 2: CADEIAS DE MARKOV (PROBABILIDADE DE TRANSIÇÃO FÍSICA) ---
   private static getDozenMacroState(n: number): number {
     if (n === 0) return 0;
     if (n <= 12) return 1;
@@ -48,32 +46,29 @@ export class StrategyOrchestrator {
 
   private static calculateMarkovProbability(history: number[], config: StrategyConfig): number {
     const theoreticalProb = config.coverage / 37;
-    if (history.length < 5) return theoreticalProb; // Sem dados suficientes, confia na matemática pura.
+    if (history.length < 5) return theoreticalProb; 
 
     const lastNumber = history[0];
     const currentMacroState = this.getDozenMacroState(lastNumber);
+    let occurrences = 0; let winsImmediatelyAfter = 0;
     
-    let occurrences = 0;
-    let winsImmediatelyAfter = 0;
-    
-    // Varre o passado para ver o que aconteceu nas outras vezes que esse estado ocorreu
     for (let i = 1; i < history.length; i++) {
       if (this.getDozenMacroState(history[i]) === currentMacroState) {
         occurrences++;
-        // history[i] é o estado. history[i-1] é o que caiu LOGO DEPOIS dele.
-        if (config.checkWin(history[i - 1])) {
-          winsImmediatelyAfter++;
-        }
+        if (config.checkWin(history[i - 1])) winsImmediatelyAfter++;
       }
     }
-    
-    if (occurrences < 3) return theoreticalProb; // Se a amostra for muito baixa, não aplica o peso.
-    return winsImmediatelyAfter / occurrences; // Retorna a Taxa de Transição Real da Sessão
+    if (occurrences < 3) return theoreticalProb; 
+    return winsImmediatelyAfter / occurrences; 
   }
 
-  // --- GERENCIAMENTO DE RISCO E RECUPERAÇÃO ---
   private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
-    return minChip * config.minChipsRequired; 
+    const absoluteMinBet = minChip * config.minChipsRequired; 
+    const optimalExposure = bankroll * 0.015; 
+    if (optimalExposure < absoluteMinBet) return absoluteMinBet; 
+    let multiplierSteps = Math.floor(optimalExposure / absoluteMinBet); 
+    if (multiplierSteps < 1) multiplierSteps = 1;
+    return multiplierSteps * absoluteMinBet; 
   }
 
   private static calculateRecoveryBet(previousLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
@@ -85,7 +80,6 @@ export class StrategyOrchestrator {
     return steps * absoluteMinBet;
   }
 
-  // --- LIQUIDAÇÃO DE SINAIS PENDENTES ---
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
       const activeSignals = await prisma.signal.findMany({ 
@@ -120,7 +114,6 @@ export class StrategyOrchestrator {
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`); }
   }
 
-  // --- O ALGORITMO QUANTITATIVO DE DECISÃO ---
   public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
@@ -128,7 +121,7 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // 1. PRIORIDADE ABSOLUTA: MARTINGALE (Se está em recuperação, ignora Markov e força a proteção matemática)
+      // 1. PRIORIDADE ABSOLUTA: MARTINGALE (Se começou o ciclo, tem que terminar)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -145,6 +138,25 @@ export class StrategyOrchestrator {
 
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
+
+      // 2. FASE 2: CIRCUIT BREAKER GLOBAL (Trava de Anomalia na Mesa)
+      const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
+      if (closedCycles.length >= 2) {
+        const lastCycle = closedCycles[0];
+        const prevCycle = closedCycles[1];
+        
+        // Se os dois últimos ciclos da sessão inteira deram Stop Loss
+        if (lastCycle.result === "LOSS" && prevCycle.result === "LOSS") {
+          const lastSigTime = new Date(lastCycle.created_at).getTime();
+          const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
+          const CIRCUIT_BREAKER_DURATION = 20; // Tranca a máquina por 20 rodadas
+          
+          if (spinsSince < CIRCUIT_BREAKER_DURATION) {
+            console.log(`[CIRCUIT BREAKER] Mesa congelada. Aguardando ${CIRCUIT_BREAKER_DURATION - spinsSince} giros para dissipar o ruído.`);
+            return; // Aborta a análise. O sistema fica cego para novas entradas.
+          }
+        }
+      }
 
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number }[] = [];
 
@@ -174,21 +186,11 @@ export class StrategyOrchestrator {
         candidates.push({ strategy, config, zScore, requiredZScore, markovProb });
       }
 
-      // 2. CONFLUÊNCIA BIDIMENSIONAL (O Filtro Mestre)
       const validCandidates = candidates.filter(c => {
-        // Regra 1: Tem que bater a anomalia do Z-Score
         if (c.zScore > c.requiredZScore) return false;
-        
-        // Regra 2: Veto de Markov. A transição física da mesa tem que ser no mínimo 75% da teórica.
-        // Se a mesa estiver enviando sinais físicos contrários à matemática, nós não operamos.
         const theoreticalProb = c.config.coverage / 37;
         const isMarkovApproved = c.markovProb >= (theoreticalProb * 0.75);
-        
-        if (!isMarkovApproved) {
-          console.log(`[MARKOV VETO] ${c.strategy.name} bloqueada. Z-Score ativado (${c.zScore.toFixed(2)}), mas a física de transição está em declínio (${(c.markovProb * 100).toFixed(1)}%).`);
-          return false;
-        }
-        
+        if (!isMarkovApproved) return false;
         return true;
       });
 
@@ -198,7 +200,6 @@ export class StrategyOrchestrator {
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-        console.log(`[HFT TRIGGER] Alvo Armado: ${topCandidate.strategy.name} (Z: ${topCandidate.zScore.toFixed(2)} | Markov: ${(topCandidate.markovProb * 100).toFixed(1)}%)`);
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
