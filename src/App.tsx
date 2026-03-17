@@ -30,6 +30,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
   
+  // NOVO: Estado para armazenar os dados de Auditoria (Pós-Sessão)
+  const [auditData, setAuditData] = useState<any>(null);
+  
   const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
@@ -60,7 +63,7 @@ export default function App() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
       localStorage.setItem("rlsys_active_session", json.id); 
-      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setCurrentView("ACTIVE"); 
+      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setAuditData(null); setCurrentView("ACTIVE"); 
     } catch (err: any) {
       if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else setError(err.message || "Erro de conexão.");
     } finally { setLoading(false); }
@@ -79,10 +82,10 @@ export default function App() {
     }
   }, [sessionId]);
 
-  useEffect(() => { if (sessionId) { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, fetchData]);
+  useEffect(() => { if (sessionId && data?.session?.status !== "CLOSED") { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, data?.session?.status, fetchData]);
 
   useEffect(() => {
-    if (!data?.session) return;
+    if (!data?.session || data.session.status === "CLOSED") return;
     const initialB = data.session.initial_bankroll;
     const currentB = data.session.current_bankroll;
     const highestB = data.session.highest_bankroll || initialB;
@@ -140,8 +143,6 @@ export default function App() {
               const payout = getPayoutRatio(currSig.strategy?.name); const profitNet = currSig.suggested_amount * payout;
               setActiveModal({ type: 'GREEN', data: currSig, metrics: { pGoal, profitNet } });
             } else if (currSig.result === 'LOSS') {
-              
-              // SOMA DINÂMICA DE LOSS ACUMULADO DO CICLO
               let accLoss = 0;
               const stratSigs = currentSignals.filter((s:any) => s.strategy_id === currSig.strategy_id).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
               for (const s of stratSigs) {
@@ -150,12 +151,8 @@ export default function App() {
                       if (s.martingale_step === 0) break;
                   }
               }
-
               const galeSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && (s.result === 'SUGGESTED' || s.result === 'PENDING') && s.martingale_step > currSig.martingale_step);
-              
-              if (galeSig) { 
-                setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: accLoss } }); 
-              } 
+              if (galeSig) { setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: accLoss } }); } 
               else { 
                 const currentLossAbsolute = initialB - currentB;
                 const stopLossPercent = currentLossAbsolute > 0 ? (currentLossAbsolute / (initialB * 0.15)) * 100 : 0;
@@ -177,8 +174,41 @@ export default function App() {
       const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
       if (!res.ok) throw new Error("Erro ao fechar caixa.");
       localStorage.removeItem("rlsys_active_session"); 
-      setIsVoiceEnabled(false); fetchData(); 
+      setIsVoiceEnabled(false); await fetchAuditData(sessionId);
     } catch (err: any) { alert("Falha: " + err.message); } finally { setLoading(false); }
+  };
+
+  // BUSCA OS DADOS COMPLETOS PARA A AUDITORIA
+  const fetchAuditData = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${id}/audit`);
+      const json = await res.json();
+      setAuditData(json);
+    } catch (err) { console.error("Erro ao buscar auditoria", err); }
+  };
+
+  useEffect(() => {
+    if (data?.session?.status === "CLOSED" && !auditData && sessionId) {
+      fetchAuditData(sessionId);
+    }
+  }, [data?.session?.status, auditData, sessionId]);
+
+  // GERADOR DO ARQUIVO CSV
+  const downloadCSV = () => {
+    if (!auditData) return;
+    const BOM = "\uFEFF";
+    const headers = "Data/Hora,Estrategia,Alvo,Valor Apostado,Etapa (Gale),Status,Resultado\n";
+    
+    const rows = auditData.signals.map((s: any) => {
+      const date = new Date(s.created_at).toLocaleString('pt-BR');
+      return `"${date}","${s.strategy.name}","${s.target_bet.replace(/_/g, ' ')}",R$ ${s.suggested_amount.toFixed(2)},${s.martingale_step},"${s.result}",${s.result === 'WIN' ? 'LUCRO' : (s.result === 'LOSS' ? 'PREJUIZO' : 'IGNORADO')}`;
+    }).join("\n");
+
+    const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(BOM + headers + rows);
+    const link = document.createElement("a");
+    link.setAttribute("href", csvContent);
+    link.setAttribute("download", `Auditoria_RLsys_${auditData.id.substring(0,8)}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const handleNumberClick = async (number: number) => {
@@ -189,12 +219,9 @@ export default function App() {
   };
 
   const handleSignalAction = async (signalId: string, action: "CONFIRM" | "REJECT") => {
-    if (!sessionId) return;
-    setLoading(true);
-    try {
-      await fetch(`/api/signals/${signalId}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
-      fetchData();
-    } catch (err: any) { alert("Erro ao registrar ação."); } finally { setLoading(false); }
+    if (!sessionId) return; setLoading(true);
+    try { await fetch(`/api/signals/${signalId}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }); fetchData(); } 
+    catch (err: any) { alert("Erro ao registrar ação."); } finally { setLoading(false); }
   };
 
   const handleOcrUpload = async (file: File) => {
@@ -269,19 +296,71 @@ export default function App() {
     );
   }
 
+  // --- O NOVO PAINEL DE AUDITORIA HFT (PÓS-SESSÃO) ---
   if (data?.session?.status === "CLOSED") {
-    const pnl = data.session.current_bankroll - data.session.initial_bankroll;
+    if (!auditData) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-indigo-500 font-black animate-pulse">Compilando Auditoria...</div>);
+    
+    const pnl = auditData.current_bankroll - auditData.initial_bankroll;
+    const wins = auditData.signals.filter((s:any) => s.result === 'WIN').length;
+    const totalConcluded = auditData.signals.filter((s:any) => s.result === 'WIN' || s.result === 'LOSS').length;
+    const winRate = totalConcluded > 0 ? ((wins / totalConcluded) * 100).toFixed(1) : 0;
+    
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
-        <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
-          <h2 className="text-white text-xl font-black uppercase tracking-widest mb-4">Sessão Encerrada</h2>
-          <div className="bg-black/50 p-4 rounded-xl mb-6"><span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Resultado Líquido</span><span className={`block text-3xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span></div>
-          <button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-colors">Voltar</button>
+      <div className="min-h-screen bg-gray-950 flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-y-auto">
+        <div className="bg-indigo-950/40 border-b border-indigo-900/50 p-6 pt-10 text-center">
+          <div className="w-16 h-16 bg-indigo-600/20 border border-indigo-500 rounded-full mx-auto flex items-center justify-center mb-4"><span className="text-2xl">📋</span></div>
+          <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-1">Post-Mortem</h2>
+          <p className="text-indigo-400 text-[10px] uppercase font-bold tracking-[0.2em]">Auditoria de Sessão HFT</p>
+        </div>
+        
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">P&L Final</span>
+              <span className={`block text-xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Taxa de Acerto</span>
+              <span className="block text-xl font-black text-white font-mono">{winRate}%</span>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Maior Pico de Lucro</span>
+              <span className="block text-sm font-bold text-indigo-400 font-mono">R$ {auditData.highest_bankroll?.toFixed(2) || "0.00"}</span>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Giros Lidos</span>
+              <span className="block text-sm font-bold text-white font-mono">{auditData.spins?.length || 0}</span>
+            </div>
+          </div>
+
+          <button onClick={downloadCSV} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors flex justify-center items-center gap-2">
+            <span>⬇️</span> Exportar Planilha (.CSV)
+          </button>
+
+          <div className="bg-black/50 border border-gray-800 rounded-xl overflow-hidden mt-4">
+            <div className="p-3 border-b border-gray-800 bg-gray-900/50"><span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Linha do Tempo de Entradas</span></div>
+            <div className="max-h-60 overflow-y-auto p-2 space-y-2">
+              {auditData.signals.length === 0 && <div className="text-center p-4 text-xs text-gray-600">Nenhum sinal gerado nesta sessão.</div>}
+              {auditData.signals.slice().reverse().map((sig: any) => (
+                <div key={sig.id} className="flex justify-between items-center bg-gray-950 p-3 rounded border border-gray-800/50">
+                  <div>
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded mr-2 ${sig.result === 'WIN' ? 'bg-green-900/30 text-green-500' : (sig.result === 'LOSS' ? 'bg-red-900/30 text-red-500' : 'bg-gray-800 text-gray-400')}`}>{sig.result}</span>
+                    <span className="text-[10px] font-bold text-gray-300">{sig.strategy?.name}</span>
+                    {sig.martingale_step > 0 && <span className="ml-2 text-[8px] text-orange-400 font-black">GALE {sig.martingale_step}</span>}
+                  </div>
+                  <span className="text-[10px] font-mono text-gray-500">R$ {sig.suggested_amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors mt-6">Voltar ao Radar Global</button>
         </div>
       </div>
     );
   }
 
+  // --- TELA ATIVA (RADAR) ---
   const initialB = data?.session?.initial_bankroll || 1;
   const currentB = data?.session?.current_bankroll || 1;
   const highestB = data?.session?.highest_bankroll || initialB;
@@ -317,10 +396,7 @@ export default function App() {
                  <p className="text-orange-400 text-[10px] uppercase font-bold tracking-widest mt-1">Anomalia detectada. Mesa Interrompida.</p>
                </div>
             </div>
-            <div className="text-right pl-2">
-              <span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span>
-              <span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros<br/>Restantes</span>
-            </div>
+            <div className="text-right pl-2"><span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span><span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros<br/>Restantes</span></div>
           </div>
         )}
         
