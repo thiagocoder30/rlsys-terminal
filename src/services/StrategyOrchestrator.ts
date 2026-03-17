@@ -10,15 +10,15 @@ interface StrategyConfig {
 
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
-    "Race: Vizinhos 1 & 21": { payoutRatio: 0.38, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
-    "James Bond": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 3, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
+    "Race: Vizinhos 1 & 21": { payoutRatio: 10/26, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
+    "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
     "Race: Fusion": { payoutRatio: 1.0, coverage: 18, minChipsRequired: 1, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
-    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
-    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
-    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
-    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
-    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
-    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 0.44, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
+    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
+    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
+    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
+    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
+    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
+    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -37,29 +37,43 @@ export class StrategyOrchestrator {
     return (actualHits - expectedHits) / standardDeviation;
   }
 
+  // --- O NOVO MOTOR DE ESCALONAMENTO PROPORCIONAL ---
   private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired; 
-    const theoreticalWinRate = config.coverage / 37; 
-    let kellyFraction = theoreticalWinRate - ((1 - theoreticalWinRate) / config.payoutRatio);
-    if (kellyFraction <= 0) kellyFraction = 0.01; 
-    const safeFraction = kellyFraction / 4; 
-    let rawBet = bankroll * Math.min(safeFraction, 0.015); 
-    let steps = Math.round(rawBet / absoluteMinBet); if (steps < 1) steps = 1;
-    return steps * absoluteMinBet; 
+    
+    // Tenta alocar 1.5% da banca (Gerenciamento de Risco Institucional)
+    const optimalExposure = bankroll * 0.015; 
+    
+    // Se 1.5% for menor que o custo obrigatório da estratégia, cravamos no mínimo exigido pela mesa.
+    // (Ex: Banca de R$ 50 -> 1.5% é R$ 0.75. Mas a mesa exige R$ 10.50. Então joga R$ 10.50).
+    if (optimalExposure < absoluteMinBet) {
+      return absoluteMinBet; 
+    }
+
+    // Se a banca for grande, multiplicamos as fichas proporcionalmente para escalar o lucro.
+    let multiplierSteps = Math.floor(optimalExposure / absoluteMinBet); 
+    if (multiplierSteps < 1) multiplierSteps = 1;
+    
+    return multiplierSteps * absoluteMinBet; 
   }
 
   private static calculateRecoveryBet(previousLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
     const targetNetProfit = previousLoss + absoluteMinBet; 
     let exactBet = targetNetProfit / config.payoutRatio;
-    const absoluteMaxBet = bankroll * 0.08; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
+    
+    // Trava de Sobrevivência (Margem Call): Não arrisca mais de 15% em um único Gale
+    const absoluteMaxBet = bankroll * 0.15; 
+    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    
+    let steps = Math.ceil(exactBet / absoluteMinBet); 
+    if (steps < 1) steps = 1;
+    
     return steps * absoluteMinBet;
   }
 
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
-      // Busca Sinais Sugeridos (Aguardando clique) e Pendentes (Aguardando roleta)
       const activeSignals = await prisma.signal.findMany({ 
         where: { session_id: sessionId, result: { in: ["PENDING", "SUGGESTED"] } }, 
         include: { strategy: true }
@@ -70,10 +84,8 @@ export class StrategyOrchestrator {
       
       for (const sig of activeSignals) {
         if (sig.result === "SUGGESTED") {
-          // A Roda girou e o usuário não confirmou a aposta. Ignora a sugestão e protege o caixa.
           await prisma.signal.update({ where: { id: sig.id }, data: { result: "MISSED" } });
         } else if (sig.result === "PENDING") {
-          // Aposta confirmada. Processa o Win/Loss real.
           const config = this.getConfig(sig.strategy.name);
           const isWin = config.checkWin(newNumber);
           const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
@@ -109,7 +121,6 @@ export class StrategyOrchestrator {
           if (nextStep === 1) { 
             const config = this.getConfig(strategy.name);
             const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config, session.min_chip, session.current_bankroll);
-            // O Gale também entra como SUGGESTED exigindo confirmação
             await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
             return; 
           }
@@ -149,7 +160,6 @@ export class StrategyOrchestrator {
 
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
-        // Cria o sinal exigindo o OK do operador
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
