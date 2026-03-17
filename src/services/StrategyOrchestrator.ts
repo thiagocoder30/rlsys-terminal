@@ -28,6 +28,7 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
+  // --- MOTOR 1: REGRESSÃO À MÉDIA (Z-SCORE) ---
   public static calculateSectorZScore(history: number[], config: StrategyConfig): number {
     const sample = history.slice(0, 20); const n = sample.length;
     if (n < 10) return 0.0; 
@@ -37,41 +38,54 @@ export class StrategyOrchestrator {
     return (actualHits - expectedHits) / standardDeviation;
   }
 
-  // --- O NOVO MOTOR DE ESCALONAMENTO PROPORCIONAL ---
-  private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
-    const absoluteMinBet = minChip * config.minChipsRequired; 
-    
-    // Tenta alocar 1.5% da banca (Gerenciamento de Risco Institucional)
-    const optimalExposure = bankroll * 0.015; 
-    
-    // Se 1.5% for menor que o custo obrigatório da estratégia, cravamos no mínimo exigido pela mesa.
-    // (Ex: Banca de R$ 50 -> 1.5% é R$ 0.75. Mas a mesa exige R$ 10.50. Então joga R$ 10.50).
-    if (optimalExposure < absoluteMinBet) {
-      return absoluteMinBet; 
-    }
+  // --- MOTOR 2: CADEIAS DE MARKOV (PROBABILIDADE DE TRANSIÇÃO FÍSICA) ---
+  private static getDozenMacroState(n: number): number {
+    if (n === 0) return 0;
+    if (n <= 12) return 1;
+    if (n <= 24) return 2;
+    return 3;
+  }
 
-    // Se a banca for grande, multiplicamos as fichas proporcionalmente para escalar o lucro.
-    let multiplierSteps = Math.floor(optimalExposure / absoluteMinBet); 
-    if (multiplierSteps < 1) multiplierSteps = 1;
+  private static calculateMarkovProbability(history: number[], config: StrategyConfig): number {
+    const theoreticalProb = config.coverage / 37;
+    if (history.length < 5) return theoreticalProb; // Sem dados suficientes, confia na matemática pura.
+
+    const lastNumber = history[0];
+    const currentMacroState = this.getDozenMacroState(lastNumber);
     
-    return multiplierSteps * absoluteMinBet; 
+    let occurrences = 0;
+    let winsImmediatelyAfter = 0;
+    
+    // Varre o passado para ver o que aconteceu nas outras vezes que esse estado ocorreu
+    for (let i = 1; i < history.length; i++) {
+      if (this.getDozenMacroState(history[i]) === currentMacroState) {
+        occurrences++;
+        // history[i] é o estado. history[i-1] é o que caiu LOGO DEPOIS dele.
+        if (config.checkWin(history[i - 1])) {
+          winsImmediatelyAfter++;
+        }
+      }
+    }
+    
+    if (occurrences < 3) return theoreticalProb; // Se a amostra for muito baixa, não aplica o peso.
+    return winsImmediatelyAfter / occurrences; // Retorna a Taxa de Transição Real da Sessão
+  }
+
+  // --- GERENCIAMENTO DE RISCO E RECUPERAÇÃO ---
+  private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
+    return minChip * config.minChipsRequired; 
   }
 
   private static calculateRecoveryBet(previousLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
     const targetNetProfit = previousLoss + absoluteMinBet; 
     let exactBet = targetNetProfit / config.payoutRatio;
-    
-    // Trava de Sobrevivência (Margem Call): Não arrisca mais de 15% em um único Gale
-    const absoluteMaxBet = bankroll * 0.15; 
-    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    
-    let steps = Math.ceil(exactBet / absoluteMinBet); 
-    if (steps < 1) steps = 1;
-    
+    const absoluteMaxBet = bankroll * 0.15; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet;
   }
 
+  // --- LIQUIDAÇÃO DE SINAIS PENDENTES ---
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
       const activeSignals = await prisma.signal.findMany({ 
@@ -106,6 +120,7 @@ export class StrategyOrchestrator {
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`); }
   }
 
+  // --- O ALGORITMO QUANTITATIVO DE DECISÃO ---
   public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
@@ -113,6 +128,7 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
+      // 1. PRIORIDADE ABSOLUTA: MARTINGALE (Se está em recuperação, ignora Markov e força a proteção matemática)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -130,7 +146,7 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number }[] = [];
+      let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number }[] = [];
 
       for (const strategy of activeStrategies) {
         const config = this.getConfig(strategy.name);
@@ -139,7 +155,8 @@ export class StrategyOrchestrator {
 
         const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
         const isPenalized = lastClosedCycle && lastClosedCycle.result === "LOSS";
-        const requiredCooldown = isPenalized ? 12 : 3; const requiredZScore = isPenalized ? -1.35 : -0.85; 
+        const requiredCooldown = isPenalized ? 12 : 3; 
+        const requiredZScore = isPenalized ? -1.35 : -0.85; 
 
         let isOnCooldown = false;
         if (lastSignal && lastSignal.result !== "PENDING" && lastSignal.result !== "SUGGESTED") {
@@ -150,17 +167,38 @@ export class StrategyOrchestrator {
 
         if (isOnCooldown) continue; 
         if (config.canTrigger && !config.canTrigger(spinNumbersTimeline)) continue;
+        
         const zScore = this.calculateSectorZScore(spinNumbersTimeline, config);
-        candidates.push({ strategy, config, zScore, requiredZScore });
+        const markovProb = this.calculateMarkovProbability(spinNumbersTimeline, config);
+        
+        candidates.push({ strategy, config, zScore, requiredZScore, markovProb });
       }
 
-      const validCandidates = candidates.filter(c => c.zScore <= c.requiredZScore);
+      // 2. CONFLUÊNCIA BIDIMENSIONAL (O Filtro Mestre)
+      const validCandidates = candidates.filter(c => {
+        // Regra 1: Tem que bater a anomalia do Z-Score
+        if (c.zScore > c.requiredZScore) return false;
+        
+        // Regra 2: Veto de Markov. A transição física da mesa tem que ser no mínimo 75% da teórica.
+        // Se a mesa estiver enviando sinais físicos contrários à matemática, nós não operamos.
+        const theoreticalProb = c.config.coverage / 37;
+        const isMarkovApproved = c.markovProb >= (theoreticalProb * 0.75);
+        
+        if (!isMarkovApproved) {
+          console.log(`[MARKOV VETO] ${c.strategy.name} bloqueada. Z-Score ativado (${c.zScore.toFixed(2)}), mas a física de transição está em declínio (${(c.markovProb * 100).toFixed(1)}%).`);
+          return false;
+        }
+        
+        return true;
+      });
+
       validCandidates.sort((a, b) => a.zScore - b.zScore);
       const topCandidate = validCandidates[0]; 
 
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+        console.log(`[HFT TRIGGER] Alvo Armado: ${topCandidate.strategy.name} (Z: ${topCandidate.zScore.toFixed(2)} | Markov: ${(topCandidate.markovProb * 100).toFixed(1)}%)`);
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
