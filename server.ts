@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -91,7 +92,21 @@ async function startServer() {
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
 
-  // NOVA ROTA DE CONFIRMAÇÃO DA APOSTA
+  // NOVA ROTA: Extração Completa para Auditoria Institucional
+  app.get("/api/sessions/:id/audit", validateUUID, async (req: any, res: any) => {
+    try {
+      const session = await prisma.session.findUnique({
+        where: { id: req.params.id },
+        include: {
+          spins: { orderBy: { created_at: "asc" } },
+          signals: { orderBy: { created_at: "asc" }, include: { strategy: true } }
+        }
+      });
+      if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+      res.json(session);
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
   app.post("/api/signals/:id/action", validateUUID, async (req: any, res: any) => {
     try {
       const { id } = req.params;
@@ -189,3 +204,4 @@ async function startServer() {
 }
 
 startServer();
+      
