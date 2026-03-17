@@ -71,12 +71,23 @@ export class StrategyOrchestrator {
     return multiplierSteps * absoluteMinBet; 
   }
 
-  private static calculateRecoveryBet(previousLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
+  // O NOVO CÁLCULO DE RECUPERAÇÃO SUAVIZADA (SOFT MARTINGALE)
+  private static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number, step: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
-    const targetNetProfit = previousLoss + absoluteMinBet; 
+    
+    // Gale 1 recupera 50%. Gale 2 recupera 100%.
+    const recoveryFraction = step === 1 ? 0.5 : 1.0;
+    const targetNetProfit = (accumulatedLoss * recoveryFraction) + absoluteMinBet; 
+    
     let exactBet = targetNetProfit / config.payoutRatio;
-    const absoluteMaxBet = bankroll * 0.15; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
+    
+    // Trava máxima por tiro: 10% da banca
+    const absoluteMaxBet = bankroll * 0.10; 
+    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    
+    let steps = Math.ceil(exactBet / absoluteMinBet); 
+    if (steps < 1) steps = 1;
+    
     return steps * absoluteMinBet;
   }
 
@@ -121,15 +132,24 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // 1. PRIORIDADE ABSOLUTA: MARTINGALE (Se começou o ciclo, tem que terminar)
+      // 1. PRIORIDADE ABSOLUTA: SOFT MARTINGALE (Até 2 Passos)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
+        
         if (lastSignal && lastSignal.result === "LOSS") {
           const nextStep = lastSignal.martingale_step + 1;
-          if (nextStep === 1) { 
+          
+          if (nextStep <= 2) { 
+            // Calcula o prejuízo acumulado APENAS do ciclo atual
+            let accLoss = 0;
+            for (const s of strategySignals) {
+              if (s.result === "WIN" || s.result === "MISSED" || (s.result === "LOSS" && s.martingale_step === 2)) break;
+              if (s.result === "LOSS") accLoss += s.suggested_amount;
+            }
+
             const config = this.getConfig(strategy.name);
-            const suggestedAmount = this.calculateRecoveryBet(lastSignal.suggested_amount, config, session.min_chip, session.current_bankroll);
+            const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll, nextStep);
             await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
             return; 
           }
@@ -139,22 +159,18 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // 2. FASE 2: CIRCUIT BREAKER GLOBAL (Trava de Anomalia na Mesa)
-      const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
+      // 2. FASE 2: CIRCUIT BREAKER GLOBAL (Ajustado para monitorar falhas no Gale 2)
+      const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 2));
       if (closedCycles.length >= 2) {
         const lastCycle = closedCycles[0];
         const prevCycle = closedCycles[1];
         
-        // Se os dois últimos ciclos da sessão inteira deram Stop Loss
         if (lastCycle.result === "LOSS" && prevCycle.result === "LOSS") {
           const lastSigTime = new Date(lastCycle.created_at).getTime();
           const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
-          const CIRCUIT_BREAKER_DURATION = 20; // Tranca a máquina por 20 rodadas
+          const CIRCUIT_BREAKER_DURATION = 20; 
           
-          if (spinsSince < CIRCUIT_BREAKER_DURATION) {
-            console.log(`[CIRCUIT BREAKER] Mesa congelada. Aguardando ${CIRCUIT_BREAKER_DURATION - spinsSince} giros para dissipar o ruído.`);
-            return; // Aborta a análise. O sistema fica cego para novas entradas.
-          }
+          if (spinsSince < CIRCUIT_BREAKER_DURATION) return;
         }
       }
 
@@ -165,7 +181,7 @@ export class StrategyOrchestrator {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
 
-        const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
+        const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 2));
         const isPenalized = lastClosedCycle && lastClosedCycle.result === "LOSS";
         const requiredCooldown = isPenalized ? 12 : 3; 
         const requiredZScore = isPenalized ? -1.35 : -0.85; 
