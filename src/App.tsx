@@ -30,7 +30,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
   
-  // NOVO ESTADO: Monitor do Circuit Breaker
   const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
@@ -89,8 +88,7 @@ export default function App() {
     const highestB = data.session.highest_bankroll || initialB;
     const currentSignals = data.session.signals || [];
 
-    // --- LEITURA DO CIRCUIT BREAKER (FRONTEND SINC) ---
-    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 2)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     let cbActive = false; let cbSpinsLeft = 0;
     if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
       const lastStopDate = new Date(closedCycles[0].created_at).getTime();
@@ -99,7 +97,6 @@ export default function App() {
     }
     setCircuitBreaker({ active: cbActive, spinsLeft: cbSpinsLeft });
 
-    // --- TRAILING STOP ---
     let dynamicStopLimit = initialB * 0.85; 
     let stopLabel = "HARD STOP (-15%)";
     let isTrailing = false;
@@ -143,17 +140,26 @@ export default function App() {
               const payout = getPayoutRatio(currSig.strategy?.name); const profitNet = currSig.suggested_amount * payout;
               setActiveModal({ type: 'GREEN', data: currSig, metrics: { pGoal, profitNet } });
             } else if (currSig.result === 'LOSS') {
+              
+              // SOMA DINÂMICA DE LOSS ACUMULADO DO CICLO
+              let accLoss = 0;
+              const stratSigs = currentSignals.filter((s:any) => s.strategy_id === currSig.strategy_id).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+              for (const s of stratSigs) {
+                  if (new Date(s.created_at).getTime() <= new Date(currSig.created_at).getTime()) {
+                      if (s.result === "LOSS") accLoss += s.suggested_amount;
+                      if (s.martingale_step === 0) break;
+                  }
+              }
+
               const galeSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && (s.result === 'SUGGESTED' || s.result === 'PENDING') && s.martingale_step > currSig.martingale_step);
-              if (galeSig) { setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: currSig.suggested_amount } }); } 
+              
+              if (galeSig) { 
+                setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: accLoss } }); 
+              } 
               else { 
-                let totalCycleLoss = currSig.suggested_amount;
-                if (currSig.martingale_step === 1) {
-                  const prevInitialSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && s.martingale_step === 0 && s.created_at < currSig.created_at);
-                  if (prevInitialSig) totalCycleLoss += prevInitialSig.suggested_amount;
-                }
                 const currentLossAbsolute = initialB - currentB;
                 const stopLossPercent = currentLossAbsolute > 0 ? (currentLossAbsolute / (initialB * 0.15)) * 100 : 0;
-                setActiveModal({ type: 'LOSS', data: currSig, metrics: { totalCycleLoss, stopLossPercent } }); 
+                setActiveModal({ type: 'LOSS', data: currSig, metrics: { totalCycleLoss: accLoss, stopLossPercent } }); 
               }
             }
           }
@@ -302,7 +308,6 @@ export default function App() {
           <div className="text-right flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span><span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span></div>
         </div>
 
-        {/* ALERTA DO CIRCUIT BREAKER */}
         {circuitBreaker.active && (
           <div className="mx-4 mb-4 bg-orange-950/80 border-2 border-orange-500 p-4 rounded-xl flex items-center justify-between shadow-[0_0_20px_rgba(249,115,22,0.3)] animate-pulse">
             <div className="flex items-center gap-3">
@@ -415,7 +420,7 @@ export default function App() {
               <div className="bg-orange-950 border-2 border-orange-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(249,115,22,0.3)]">
                 <div className="w-20 h-20 bg-orange-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">⚠️</span></div>
                 <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Recuperação</h2>
-                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-orange-900/50"><div className="flex justify-between items-center mb-2 border-b border-orange-900/50 pb-2"><span className="text-[10px] text-gray-400 uppercase tracking-widest">Loss Anterior</span><span className="text-sm text-red-400 font-mono">- R$ {activeModal.metrics?.previousLoss?.toFixed(2)}</span></div><div className="text-center pt-2"><span className="block text-[10px] text-orange-500 font-black uppercase tracking-widest mb-1">Próxima Aposta Total</span><span className="block text-3xl text-white font-black font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span></div></div>
+                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-orange-900/50"><div className="flex justify-between items-center mb-2 border-b border-orange-900/50 pb-2"><span className="text-[10px] text-gray-400 uppercase tracking-widest">Loss Acumulado</span><span className="text-sm text-red-400 font-mono">- R$ {activeModal.metrics?.previousLoss?.toFixed(2)}</span></div><div className="text-center pt-2"><span className="block text-[10px] text-orange-500 font-black uppercase tracking-widest mb-1">Próxima Aposta Total</span><span className="block text-3xl text-white font-black font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span></div></div>
                 <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Confirmar Ordem de Proteção</button>
               </div>
             )}
