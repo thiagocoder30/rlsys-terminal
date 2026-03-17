@@ -10,9 +10,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const getPayoutRatio = (stratName: string) => {
   if (!stratName) return 1.0;
-  if (stratName.includes("Vizinhos")) return 0.38; 
-  if (stratName.includes("James Bond")) return 0.44;
-  if (stratName.includes("Cross")) return 0.44; 
+  if (stratName.includes("Vizinhos")) return 10 / 26; 
+  if (stratName.includes("James Bond")) return 8 / 20;
+  if (stratName.includes("Cross")) return 9 / 21; 
   if (stratName.includes("Dúzia") || stratName.includes("Coluna")) return 2.0;
   return 1.0;
 };
@@ -29,11 +29,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
+  
+  // NOVO ESTADO: Monitor do Circuit Breaker
+  const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const spokenSignalsRef = useRef<Set<string>>(new Set());
-  
   const prevSignalsRef = useRef<any[]>([]);
+  
   const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE'|'GLOBAL_STOP', data?: any, metrics?: any} | null>(null);
   const [debugInfo, setDebugInfo] = useState<{isOpen: boolean; sentImageBase64: string | null; rawAiText: string; filteredNumbers: number[];}>({ isOpen: false, sentImageBase64: null, rawAiText: "", filteredNumbers: [] });
 
@@ -86,6 +89,17 @@ export default function App() {
     const highestB = data.session.highest_bankroll || initialB;
     const currentSignals = data.session.signals || [];
 
+    // --- LEITURA DO CIRCUIT BREAKER (FRONTEND SINC) ---
+    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    let cbActive = false; let cbSpinsLeft = 0;
+    if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
+      const lastStopDate = new Date(closedCycles[0].created_at).getTime();
+      const spinsSince = data.session.spins.filter((s:any) => new Date(s.created_at).getTime() > lastStopDate).length;
+      if (spinsSince < 20) { cbActive = true; cbSpinsLeft = 20 - spinsSince; }
+    }
+    setCircuitBreaker({ active: cbActive, spinsLeft: cbSpinsLeft });
+
+    // --- TRAILING STOP ---
     let dynamicStopLimit = initialB * 0.85; 
     let stopLabel = "HARD STOP (-15%)";
     let isTrailing = false;
@@ -104,7 +118,6 @@ export default function App() {
     }
 
     if (isVoiceEnabled) {
-      // O sistema SÓ FALA quando aparece a Sugestão (Ação Requerida)
       const suggestedSignals = currentSignals.filter((s: any) => s.result === "SUGGESTED");
       suggestedSignals.forEach((signal: any) => {
         if (!spokenSignalsRef.current.has(signal.id)) {
@@ -121,7 +134,6 @@ export default function App() {
     if (activeModal?.type !== 'GLOBAL_STOP') {
       const prevSignals = prevSignalsRef.current;
       prevSignals.forEach(prevSig => {
-        // OS MODAIS DE RESOLUÇÃO SÓ APARECEM SE A APOSTA ESTAVA 'PENDING' (CONFIRMADA)
         if (prevSig.result === 'PENDING') {
           const currSig = currentSignals.find((s:any) => s.id === prevSig.id);
           if (currSig && currSig.result !== 'PENDING') {
@@ -170,7 +182,6 @@ export default function App() {
     catch (err: any) { alert("Erro ao inserir."); } finally { setLoading(false); }
   };
 
-  // BOTÕES DE CONFIRMAÇÃO
   const handleSignalAction = async (signalId: string, action: "CONFIRM" | "REJECT") => {
     if (!sessionId) return;
     setLoading(true);
@@ -258,10 +269,7 @@ export default function App() {
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
         <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl relative overflow-hidden">
           <h2 className="text-white text-xl font-black uppercase tracking-widest mb-4">Sessão Encerrada</h2>
-          <div className="bg-black/50 p-4 rounded-xl mb-6">
-            <span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Resultado Líquido</span>
-            <span className={`block text-3xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span>
-          </div>
+          <div className="bg-black/50 p-4 rounded-xl mb-6"><span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Resultado Líquido</span><span className={`block text-3xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span></div>
           <button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-colors">Voltar</button>
         </div>
       </div>
@@ -293,8 +301,25 @@ export default function App() {
           <div className="flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">{visualStopLabel}</span><span className={`text-xs font-mono font-bold ${highestB > initialB ? 'text-indigo-400' : 'text-red-400'}`}>R$ {visualStopLimit.toFixed(2)}</span></div>
           <div className="text-right flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span><span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span></div>
         </div>
+
+        {/* ALERTA DO CIRCUIT BREAKER */}
+        {circuitBreaker.active && (
+          <div className="mx-4 mb-4 bg-orange-950/80 border-2 border-orange-500 p-4 rounded-xl flex items-center justify-between shadow-[0_0_20px_rgba(249,115,22,0.3)] animate-pulse">
+            <div className="flex items-center gap-3">
+               <span className="text-3xl">⚠️</span>
+               <div>
+                 <h3 className="text-orange-500 font-black uppercase tracking-widest text-sm">Circuit Breaker</h3>
+                 <p className="text-orange-400 text-[10px] uppercase font-bold tracking-widest mt-1">Anomalia detectada. Mesa Interrompida.</p>
+               </div>
+            </div>
+            <div className="text-right pl-2">
+              <span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span>
+              <span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros<br/>Restantes</span>
+            </div>
+          </div>
+        )}
         
-        {data?.strategiesStatus && data.strategiesStatus.length > 0 && (
+        {data?.strategiesStatus && data.strategiesStatus.length > 0 && !circuitBreaker.active && (
           <div className="mt-4 mx-4 bg-gray-900/50 border border-gray-800 rounded-xl p-4 shadow-inner max-h-40 overflow-y-auto">
             <span className="block text-[10px] uppercase font-black text-gray-500 tracking-[0.2em] mb-3">Ranking Quantitativo</span>
             <div className="grid grid-cols-2 gap-2">
@@ -308,7 +333,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ALERTA DE OPORTUNIDADE COM BOTÕES DE AÇÃO */}
         {data?.session?.signals && data.session.signals.length > 0 && data.session.signals.map((sig: any) => {
           if (sig.result !== "SUGGESTED" && sig.result !== "PENDING") return null;
           return (
@@ -331,16 +355,13 @@ export default function App() {
                  </div>
                </div>
                
-               {/* BOTÕES APARECEM SOMENTE QUANDO A AÇÃO É REQUERIDA */}
                {sig.result === "SUGGESTED" ? (
                  <div className="mt-4 flex gap-2 w-full">
                    <button onClick={() => handleSignalAction(sig.id, "CONFIRM")} disabled={loading} className="flex-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-2 rounded-lg uppercase tracking-widest transition-all">Fiz a Aposta</button>
                    <button onClick={() => handleSignalAction(sig.id, "REJECT")} disabled={loading} className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-400 text-[10px] font-black py-2 rounded-lg uppercase tracking-widest transition-all">Ignorar</button>
                  </div>
                ) : (
-                 <div className="mt-4 text-center py-2 bg-black/40 rounded-lg">
-                   <span className="text-[10px] text-green-500 font-black uppercase tracking-widest animate-pulse">Aguardando Roleta...</span>
-                 </div>
+                 <div className="mt-4 text-center py-2 bg-black/40 rounded-lg"><span className="text-[10px] text-green-500 font-black uppercase tracking-widest animate-pulse">Aguardando Roleta...</span></div>
                )}
             </div>
           );
