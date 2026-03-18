@@ -20,7 +20,10 @@ const OFFICIAL_STRATEGIES = [
   { name: "Macro: Low (1-18) + Zero", bayes_weight: 1.0 },
   { name: "Macro: High (19-36) + Zero", bayes_weight: 1.0 },
   { name: "Race: Sector Alpha", bayes_weight: 1.0 },
-  { name: "Race: Sector Omega", bayes_weight: 1.0 }
+  { name: "Race: Sector Omega", bayes_weight: 1.0 },
+  
+  // NOVA ARMA: IA FÍSICA
+  { name: "Dynamic: Drop Zone", bayes_weight: 1.0 }
 ];
 
 export async function syncStrategiesToDatabase(prisma: PrismaClient) {
@@ -35,7 +38,7 @@ export async function syncStrategiesToDatabase(prisma: PrismaClient) {
     for (const strategy of OFFICIAL_STRATEGIES) {
       await prisma.strategy.upsert({
         where: { name: strategy.name },
-        update: { is_active: true, bayes_weight: strategy.bayes_weight },
+        update: { is_active: true }, 
         create: { name: strategy.name, bayes_weight: strategy.bayes_weight, is_active: true }
       });
       console.log(`[BOOTSTRAP] Arsenal Tático Ativo: ${strategy.name}`);
