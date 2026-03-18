@@ -32,8 +32,6 @@ export default function App() {
   
   const [auditData, setAuditData] = useState<any>(null);
   const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
-
-  // NOVO: Estado do Cronômetro de Sessão (Time-Stop)
   const [sessionTime, setSessionTime] = useState<number>(0);
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
@@ -76,43 +74,34 @@ export default function App() {
       const res = await fetch(`/api/sessions/${sessionId}/dashboard`);
       if (!res.ok) throw new Error("Falha na sincronização");
       const json = await res.json(); 
-      if (json.session.status === "CLOSED") { localStorage.removeItem("rlsys_active_session"); }
-      setData(json); setZHistory((prev) => [...prev.slice(-49), json.zScore]);
+      if (json.session.status === "CLOSED") { localStorage.removeItem("rlsys_active_session"); setCurrentView("MACRO"); }
+      else { setData(json); setZHistory((prev) => [...prev.slice(-49), json.zScore]); }
     } catch (err: any) { 
-      if (err.message.includes("Falha")) { localStorage.removeItem("rlsys_active_session"); setCurrentView("MACRO"); }
+      // CORREÇÃO: Tolerância de latência. Não ejetar o usuário se a rede oscilar no celular.
+      console.warn("Instabilidade de rede detectada e absorvida pelo sistema."); 
     }
   }, [sessionId]);
 
   useEffect(() => { if (sessionId && data?.session?.status !== "CLOSED") { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, data?.session?.status, fetchData]);
 
-  // NOVO: MOTOR DO TIME-STOP (CRONÔMETRO)
   useEffect(() => {
     if (currentView !== "ACTIVE" || !data?.session?.created_at || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
-
     const startTime = new Date(data.session.created_at).getTime();
-    
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = now - startTime;
       setSessionTime(elapsed);
-
-      // Limite de 50 Minutos (3.000.000 ms)
       const TIME_LIMIT_MS = 50 * 60 * 1000;
-      
       if (elapsed >= TIME_LIMIT_MS && activeModal?.type !== 'GLOBAL_STOP') {
         const initialB = data.session.initial_bankroll;
         const currentB = data.session.current_bankroll;
-        setActiveModal({
-          type: 'GLOBAL_STOP',
-          metrics: { stopLabel: "TIME-STOP (FADIGA)", pnlFinal: currentB - initialB, isTrailing: currentB > initialB }
-        });
+        setActiveModal({ type: 'GLOBAL_STOP', metrics: { stopLabel: "TIME-STOP (FADIGA)", pnlFinal: currentB - initialB, isTrailing: currentB > initialB } });
         if (isVoiceEnabled) {
           const utterance = new SpeechSynthesisUtterance("Atenção. Tempo limite de operação atingido. Risco de fadiga mental crítico. Fechando o caixa compulsóriamente.");
           utterance.lang = "pt-BR"; utterance.rate = 1.1; window.speechSynthesis.speak(utterance);
         }
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [currentView, data?.session?.created_at, data?.session?.status, activeModal?.type, isVoiceEnabled]);
 
@@ -130,7 +119,7 @@ export default function App() {
     const highestB = data.session.highest_bankroll || initialB;
     const currentSignals = data.session.signals || [];
 
-    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 2)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     let cbActive = false; let cbSpinsLeft = 0;
     if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
       const lastStopDate = new Date(closedCycles[0].created_at).getTime();
@@ -235,12 +224,10 @@ export default function App() {
     if (!auditData) return;
     const BOM = "\uFEFF";
     const headers = "Data/Hora,Estrategia,Alvo,Valor Apostado,Etapa (Gale),Status,Resultado\n";
-    
     const rows = auditData.signals.map((s: any) => {
       const date = new Date(s.created_at).toLocaleString('pt-BR');
       return `"${date}","${s.strategy.name}","${s.target_bet.replace(/_/g, ' ')}",R$ ${s.suggested_amount.toFixed(2)},${s.martingale_step},"${s.result}",${s.result === 'WIN' ? 'LUCRO' : (s.result === 'LOSS' ? 'PREJUIZO' : 'IGNORADO')}`;
     }).join("\n");
-
     const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(BOM + headers + rows);
     const link = document.createElement("a");
     link.setAttribute("href", csvContent);
@@ -251,8 +238,9 @@ export default function App() {
   const handleNumberClick = async (number: number) => {
     if (!sessionId || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
     setLoading(true);
-    try { await fetch(`http://localhost:3000/api/sessions/${sessionId}/spins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ number }) }); fetchData(); } 
-    catch (err: any) { alert("Erro ao inserir."); } finally { setLoading(false); }
+    // CORREÇÃO: Removido o localhost hardcoded para suportar a rede móvel.
+    try { await fetch(`/api/sessions/${sessionId}/spins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ number }) }); fetchData(); } 
+    catch (err: any) { console.error("Erro inserção:", err); alert("Erro de latência. Tente novamente."); } finally { setLoading(false); }
   };
 
   const handleSignalAction = async (signalId: string, action: "CONFIRM" | "REJECT") => {
@@ -294,7 +282,9 @@ export default function App() {
       const numbers = [...extractedNumbersArray].reverse();
       setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr, filteredNumbers: extractedNumbersArray });
       if (numbers.length === 0) throw new Error("Nenhum número detectado.");
-      await fetch(`http://localhost:3000/api/sessions/${sessionId}/ocr/sync`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers }) });
+      
+      // CORREÇÃO: Rota Dinâmica
+      await fetch(`/api/sessions/${sessionId}/ocr/sync`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers }) });
       fetchData();
     } catch (err: any) { alert("Erro OCR: " + err.message); setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr || "FALHA", filteredNumbers: extractedNumbersArray }); } finally { setLoading(false); }
   };
@@ -335,7 +325,6 @@ export default function App() {
 
   if (data?.session?.status === "CLOSED") {
     if (!auditData) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-indigo-500 font-black animate-pulse">Compilando Auditoria...</div>);
-    
     const pnl = auditData.current_bankroll - auditData.initial_bankroll;
     const wins = auditData.signals.filter((s:any) => s.result === 'WIN').length;
     const totalConcluded = auditData.signals.filter((s:any) => s.result === 'WIN' || s.result === 'LOSS').length;
@@ -348,31 +337,14 @@ export default function App() {
           <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-1">Post-Mortem</h2>
           <p className="text-indigo-400 text-[10px] uppercase font-bold tracking-[0.2em]">Auditoria de Sessão HFT</p>
         </div>
-        
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
-              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">P&L Final</span>
-              <span className={`block text-xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
-              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Taxa de Acerto</span>
-              <span className="block text-xl font-black text-white font-mono">{winRate}%</span>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
-              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Maior Pico de Lucro</span>
-              <span className="block text-sm font-bold text-indigo-400 font-mono">R$ {auditData.highest_bankroll?.toFixed(2) || "0.00"}</span>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl">
-              <span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Giros Lidos</span>
-              <span className="block text-sm font-bold text-white font-mono">{auditData.spins?.length || 0}</span>
-            </div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">P&L Final</span><span className={`block text-xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Taxa de Acerto</span><span className="block text-xl font-black text-white font-mono">{winRate}%</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Maior Pico de Lucro</span><span className="block text-sm font-bold text-indigo-400 font-mono">R$ {auditData.highest_bankroll?.toFixed(2) || "0.00"}</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Giros Lidos</span><span className="block text-sm font-bold text-white font-mono">{auditData.spins?.length || 0}</span></div>
           </div>
-
-          <button onClick={downloadCSV} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors flex justify-center items-center gap-2">
-            <span>⬇️</span> Exportar Planilha (.CSV)
-          </button>
-
+          <button onClick={downloadCSV} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors flex justify-center items-center gap-2"><span>⬇️</span> Exportar Planilha (.CSV)</button>
           <div className="bg-black/50 border border-gray-800 rounded-xl overflow-hidden mt-4">
             <div className="p-3 border-b border-gray-800 bg-gray-900/50"><span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Linha do Tempo de Entradas</span></div>
             <div className="max-h-60 overflow-y-auto p-2 space-y-2">
@@ -389,14 +361,12 @@ export default function App() {
               ))}
             </div>
           </div>
-          
           <button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors mt-6">Voltar ao Radar Global</button>
         </div>
       </div>
     );
   }
 
-  // --- TELA ATIVA (RADAR) ---
   const initialB = data?.session?.initial_bankroll || 1;
   const currentB = data?.session?.current_bankroll || 1;
   const highestB = data?.session?.highest_bankroll || initialB;
@@ -418,33 +388,15 @@ export default function App() {
       <div className="flex-shrink-0 pt-2">
         <HeaderStatus bankroll={currentB} initialBankroll={initialB} zScore={data?.zScore || 0} isConnected={true} />
         
-        {/* PAINEL DE MÉTRICAS C/ CRONÔMETRO (UPTIME) */}
         <div className="mx-4 mt-2 mb-4 bg-gray-950 border border-gray-800 p-2 rounded-lg flex justify-between items-center">
-          <div className="flex flex-col">
-            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">{visualStopLabel}</span>
-            <span className={`text-xs font-mono font-bold ${highestB > initialB ? 'text-indigo-400' : 'text-red-400'}`}>R$ {visualStopLimit.toFixed(2)}</span>
-          </div>
-          
-          <div className="flex flex-col items-center border-x border-gray-800 px-3">
-            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Uptime</span>
-            <span className={`text-xs font-mono font-bold ${sessionTime > 45 * 60 * 1000 ? 'text-orange-500 animate-pulse' : 'text-indigo-400'}`}>{formatTime(sessionTime)}</span>
-          </div>
-
-          <div className="text-right flex flex-col">
-            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span>
-            <span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span>
-          </div>
+          <div className="flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">{visualStopLabel}</span><span className={`text-xs font-mono font-bold ${highestB > initialB ? 'text-indigo-400' : 'text-red-400'}`}>R$ {visualStopLimit.toFixed(2)}</span></div>
+          <div className="flex flex-col items-center border-x border-gray-800 px-3"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Uptime</span><span className={`text-xs font-mono font-bold ${sessionTime > 45 * 60 * 1000 ? 'text-orange-500 animate-pulse' : 'text-indigo-400'}`}>{formatTime(sessionTime)}</span></div>
+          <div className="text-right flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span><span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span></div>
         </div>
 
         {circuitBreaker.active && (
           <div className="mx-4 mb-4 bg-orange-950/80 border-2 border-orange-500 p-4 rounded-xl flex items-center justify-between shadow-[0_0_20px_rgba(249,115,22,0.3)] animate-pulse">
-            <div className="flex items-center gap-3">
-               <span className="text-3xl">⚠️</span>
-               <div>
-                 <h3 className="text-orange-500 font-black uppercase tracking-widest text-sm">Circuit Breaker</h3>
-                 <p className="text-orange-400 text-[10px] uppercase font-bold tracking-widest mt-1">Anomalia detectada. Mesa Interrompida.</p>
-               </div>
-            </div>
+            <div className="flex items-center gap-3"><span className="text-3xl">⚠️</span><div><h3 className="text-orange-500 font-black uppercase tracking-widest text-sm">Circuit Breaker</h3><p className="text-orange-400 text-[10px] uppercase font-bold tracking-widest mt-1">Anomalia detectada.</p></div></div>
             <div className="text-right pl-2"><span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span><span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros<br/>Restantes</span></div>
           </div>
         )}
@@ -484,7 +436,6 @@ export default function App() {
                    <span className="text-2xl font-black font-mono text-white">{sig.suggested_amount.toFixed(2)}</span>
                  </div>
                </div>
-               
                {sig.result === "SUGGESTED" ? (
                  <div className="mt-4 flex gap-2 w-full">
                    <button onClick={() => handleSignalAction(sig.id, "CONFIRM")} disabled={loading} className="flex-1 bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-2 rounded-lg uppercase tracking-widest transition-all">Fiz a Aposta</button>
@@ -496,7 +447,6 @@ export default function App() {
             </div>
           );
         })}
-        
         <SpinTimeline spins={data?.session?.spins || []} />
       </div>
       
