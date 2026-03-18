@@ -15,6 +15,13 @@ export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
     "Race: Vizinhos 1 & 21": { payoutRatio: 10/26, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
     "Race: Fusion": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "FUSION_MAIS_ZERO", checkWin: (num) => [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26, 0].includes(num) },
+    
+    // A NOVA ESTRATÉGIA P2 (25 Fichas Secas Extraídas do Relatório Visual)
+    "Race: P2": { 
+      payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "ESTRATEGIA_P2", 
+      checkWin: (num) => [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 29, 30, 31, 32, 34, 35].includes(num) 
+    },
+
     "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
     
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
@@ -29,7 +36,6 @@ export class StrategyOrchestrator {
     "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
     "Macro: Odd + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "ODD_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 !== 0) || n === 0 },
 
-    // NOVAS ESTRATÉGIAS INJETADAS
     "Hedge: Red + Col 2 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_RED_COL2", checkWin: (n) => RED_NUMBERS.includes(n) || (n % 3 === 2) || n === 0 },
     "Hedge: Black + Col 3 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_BLACK_COL3", checkWin: (n) => BLACK_NUMBERS.includes(n) || (n % 3 === 0) || n === 0 },
     "Macro: Low (1-18) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "LOW_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 18) || n === 0 },
@@ -90,10 +96,9 @@ export class StrategyOrchestrator {
 
   private static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
-    const targetNetProfit = accumulatedLoss + absoluteMinBet; // 100% de recuperação no Gale 1
+    const targetNetProfit = accumulatedLoss + absoluteMinBet; 
     let exactBet = targetNetProfit / config.payoutRatio;
     
-    // Teto global de sobrevivência reduzido para 10% da banca por ser tiro único
     const absoluteMaxBet = bankroll * 0.10; 
     if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
     
@@ -142,7 +147,6 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // 1. PRIORIDADE ABSOLUTA: MARTINGALE (TRAVADO EM 1 ÚNICO PASSO)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -150,7 +154,6 @@ export class StrategyOrchestrator {
         if (lastSignal && lastSignal.result === "LOSS") {
           const nextStep = lastSignal.martingale_step + 1;
           
-          // GALE 1 OBRIGATÓRIO (SE FALHAR, O CICLO MORRE AQUI)
           if (nextStep <= 1) { 
             let accLoss = 0;
             for (const s of strategySignals) {
@@ -169,7 +172,6 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // 2. FASE 2: CIRCUIT BREAKER GLOBAL (Monitora falhas no Gale 1)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2) {
         const lastCycle = closedCycles[0];
@@ -194,7 +196,6 @@ export class StrategyOrchestrator {
         const lastClosedCycle = strategySignals.find(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
         const isPenalized = lastClosedCycle && lastClosedCycle.result === "LOSS";
         
-        // MACHINE LEARNING: Se tomou Loss no Gale 1, aplica a "Quarentena Estatística" de 25 rodadas.
         const requiredCooldown = isPenalized ? 25 : 3; 
         const requiredZScore = isPenalized ? -1.50 : -0.85; 
 
@@ -214,7 +215,6 @@ export class StrategyOrchestrator {
         candidates.push({ strategy, config, zScore, requiredZScore, markovProb });
       }
 
-      // 3. RANKING DE CONFLUÊNCIA SUPREMA (Score = Z-Score - Markov)
       const validCandidates = candidates.filter(c => {
         if (c.zScore > c.requiredZScore) return false;
         const theoreticalProb = c.config.coverage / 37;
@@ -223,14 +223,12 @@ export class StrategyOrchestrator {
         return true;
       });
 
-      // O cálculo busca o menor Z-Score combinado com a maior assertividade física da mesa.
       validCandidates.sort((a, b) => {
         const scoreA = a.zScore - a.markovProb;
         const scoreB = b.zScore - b.markovProb;
         return scoreA - scoreB;
       });
       
-      // Filtra de forma impiedosa: Só envia o Número 1 do Ranking.
       const topCandidate = validCandidates[0]; 
 
       if (topCandidate) {
