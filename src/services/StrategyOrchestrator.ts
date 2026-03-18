@@ -8,17 +8,33 @@ interface StrategyConfig {
   canTrigger?: (history: number[]) => boolean; 
 }
 
+const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+const BLACK_NUMBERS = [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35];
+
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
     "Race: Vizinhos 1 & 21": { payoutRatio: 10/26, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
+    
+    // FUSION BLINDADA: Adicionado o 0 na matriz de vitória. Custo: 25 fichas. Lucro: 11 fichas. (11/25 = 0.44)
+    "Race: Fusion": { 
+      payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "FUSION_MAIS_ZERO", 
+      checkWin: (num) => [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26, 0].includes(num) 
+    },
+    
     "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
-    "Race: Fusion": { payoutRatio: 1.0, coverage: 18, minChipsRequired: 1, targetBet: "PARES", checkWin: (num) => num !== 0 && num % 2 === 0 },
+    
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 1 && h[0] <= 12 },
     "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 13 && h[0] <= 24 },
     "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0, canTrigger: (h) => h.length > 0 && h[0] >= 25 && h[0] <= 36 },
     "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 1 },
     "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 2 },
-    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 }
+    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0, canTrigger: (h) => h.length > 0 && h[0] !== 0 && h[0] % 3 === 0 },
+
+    // MACROS BLINDADAS (18 Fichas na Base + 1 Ficha no Zero). Total: 19 Fichas. Lucro Mínimo Garantido: 17 Fichas.
+    "Macro: Red + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "RED_MAIS_ZERO", checkWin: (n) => RED_NUMBERS.includes(n) || n === 0 },
+    "Macro: Black + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "BLACK_MAIS_ZERO", checkWin: (n) => BLACK_NUMBERS.includes(n) || n === 0 },
+    "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
+    "Macro: Odd + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "ODD_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 !== 0) || n === 0 }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -71,23 +87,13 @@ export class StrategyOrchestrator {
     return multiplierSteps * absoluteMinBet; 
   }
 
-  // O NOVO CÁLCULO DE RECUPERAÇÃO SUAVIZADA (SOFT MARTINGALE)
   private static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number, step: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
-    
-    // Gale 1 recupera 50%. Gale 2 recupera 100%.
     const recoveryFraction = step === 1 ? 0.5 : 1.0;
     const targetNetProfit = (accumulatedLoss * recoveryFraction) + absoluteMinBet; 
-    
     let exactBet = targetNetProfit / config.payoutRatio;
-    
-    // Trava máxima por tiro: 10% da banca
-    const absoluteMaxBet = bankroll * 0.10; 
-    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    
-    let steps = Math.ceil(exactBet / absoluteMinBet); 
-    if (steps < 1) steps = 1;
-    
+    const absoluteMaxBet = bankroll * 0.15; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet;
   }
 
@@ -132,7 +138,6 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // 1. PRIORIDADE ABSOLUTA: SOFT MARTINGALE (Até 2 Passos)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -141,7 +146,6 @@ export class StrategyOrchestrator {
           const nextStep = lastSignal.martingale_step + 1;
           
           if (nextStep <= 2) { 
-            // Calcula o prejuízo acumulado APENAS do ciclo atual
             let accLoss = 0;
             for (const s of strategySignals) {
               if (s.result === "WIN" || s.result === "MISSED" || (s.result === "LOSS" && s.martingale_step === 2)) break;
@@ -159,7 +163,6 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // 2. FASE 2: CIRCUIT BREAKER GLOBAL (Ajustado para monitorar falhas no Gale 2)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 2));
       if (closedCycles.length >= 2) {
         const lastCycle = closedCycles[0];
