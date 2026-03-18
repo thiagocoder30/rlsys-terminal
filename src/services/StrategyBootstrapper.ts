@@ -13,7 +13,15 @@ const OFFICIAL_STRATEGIES = [
   { name: "Macro: Red + Zero", bayes_weight: 1.0 },
   { name: "Macro: Black + Zero", bayes_weight: 1.0 },
   { name: "Macro: Even + Zero", bayes_weight: 1.0 },
-  { name: "Macro: Odd + Zero", bayes_weight: 1.0 }
+  { name: "Macro: Odd + Zero", bayes_weight: 1.0 },
+  
+  // NOVAS ESTRATÉGIAS DE ELITE (HEDGES ASSIMÉTRICOS E SETORES)
+  { name: "Hedge: Red + Col 2 + Zero", bayes_weight: 1.0 },
+  { name: "Hedge: Black + Col 3 + Zero", bayes_weight: 1.0 },
+  { name: "Macro: Low (1-18) + Zero", bayes_weight: 1.0 },
+  { name: "Macro: High (19-36) + Zero", bayes_weight: 1.0 },
+  { name: "Race: Sector Alpha", bayes_weight: 1.0 },
+  { name: "Race: Sector Omega", bayes_weight: 1.0 }
 ];
 
 export async function syncStrategiesToDatabase(prisma: PrismaClient) {
