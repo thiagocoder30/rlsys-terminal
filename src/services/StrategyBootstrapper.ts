@@ -1,23 +1,25 @@
 import { PrismaClient } from "@prisma/client";
 
-// O Arsenal Enxuto e de Alta Assertividade
 const OFFICIAL_STRATEGIES = [
   { name: "Race: Vizinhos 1 & 21", bayes_weight: 1.0 },
+  { name: "Race: Fusion", bayes_weight: 1.0 },
   { name: "James Bond", bayes_weight: 1.0 },
-  { name: "Race: Fusion", bayes_weight: 1.0 }, // RESTAURADO
   { name: "Cross: D1 ➔ Col 2 e 3", bayes_weight: 1.0 },
   { name: "Cross: D2 ➔ Col 1 e 3", bayes_weight: 1.0 },
   { name: "Cross: D3 ➔ Col 1 e 2", bayes_weight: 1.0 },
   { name: "Cross: C1 ➔ Duz 2 e 3", bayes_weight: 1.0 },
   { name: "Cross: C2 ➔ Duz 1 e 3", bayes_weight: 1.0 },
-  { name: "Cross: C3 ➔ Duz 1 e 2", bayes_weight: 1.0 }
+  { name: "Cross: C3 ➔ Duz 1 e 2", bayes_weight: 1.0 },
+  { name: "Macro: Red + Zero", bayes_weight: 1.0 },
+  { name: "Macro: Black + Zero", bayes_weight: 1.0 },
+  { name: "Macro: Even + Zero", bayes_weight: 1.0 },
+  { name: "Macro: Odd + Zero", bayes_weight: 1.0 }
 ];
 
 export async function syncStrategiesToDatabase(prisma: PrismaClient) {
   try {
     const officialNames = OFFICIAL_STRATEGIES.map(s => s.name);
 
-    // Soft Delete: Desliga qualquer estratégia obsoleta (ex: Dúzias Simples)
     await prisma.strategy.updateMany({
       where: { name: { notIn: officialNames } },
       data: { is_active: false }
