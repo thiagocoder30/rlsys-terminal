@@ -30,10 +30,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [zHistory, setZHistory] = useState<number[]>([]);
   
-  // NOVO: Estado para armazenar os dados de Auditoria (Pós-Sessão)
   const [auditData, setAuditData] = useState<any>(null);
-  
   const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
+
+  // NOVO: Estado do Cronômetro de Sessão (Time-Stop)
+  const [sessionTime, setSessionTime] = useState<number>(0);
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const spokenSignalsRef = useRef<Set<string>>(new Set());
@@ -63,7 +64,7 @@ export default function App() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erro no servidor");
       localStorage.setItem("rlsys_active_session", json.id); 
-      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setAuditData(null); setCurrentView("ACTIVE"); 
+      spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setAuditData(null); setSessionTime(0); setCurrentView("ACTIVE"); 
     } catch (err: any) {
       if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else setError(err.message || "Erro de conexão.");
     } finally { setLoading(false); }
@@ -83,6 +84,44 @@ export default function App() {
   }, [sessionId]);
 
   useEffect(() => { if (sessionId && data?.session?.status !== "CLOSED") { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, data?.session?.status, fetchData]);
+
+  // NOVO: MOTOR DO TIME-STOP (CRONÔMETRO)
+  useEffect(() => {
+    if (currentView !== "ACTIVE" || !data?.session?.created_at || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
+
+    const startTime = new Date(data.session.created_at).getTime();
+    
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - startTime;
+      setSessionTime(elapsed);
+
+      // Limite de 50 Minutos (3.000.000 ms)
+      const TIME_LIMIT_MS = 50 * 60 * 1000;
+      
+      if (elapsed >= TIME_LIMIT_MS && activeModal?.type !== 'GLOBAL_STOP') {
+        const initialB = data.session.initial_bankroll;
+        const currentB = data.session.current_bankroll;
+        setActiveModal({
+          type: 'GLOBAL_STOP',
+          metrics: { stopLabel: "TIME-STOP (FADIGA)", pnlFinal: currentB - initialB, isTrailing: currentB > initialB }
+        });
+        if (isVoiceEnabled) {
+          const utterance = new SpeechSynthesisUtterance("Atenção. Tempo limite de operação atingido. Risco de fadiga mental crítico. Fechando o caixa compulsóriamente.");
+          utterance.lang = "pt-BR"; utterance.rate = 1.1; window.speechSynthesis.speak(utterance);
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [currentView, data?.session?.created_at, data?.session?.status, activeModal?.type, isVoiceEnabled]);
+
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     if (!data?.session || data.session.status === "CLOSED") return;
@@ -178,7 +217,6 @@ export default function App() {
     } catch (err: any) { alert("Falha: " + err.message); } finally { setLoading(false); }
   };
 
-  // BUSCA OS DADOS COMPLETOS PARA A AUDITORIA
   const fetchAuditData = async (id: string) => {
     try {
       const res = await fetch(`/api/sessions/${id}/audit`);
@@ -193,7 +231,6 @@ export default function App() {
     }
   }, [data?.session?.status, auditData, sessionId]);
 
-  // GERADOR DO ARQUIVO CSV
   const downloadCSV = () => {
     if (!auditData) return;
     const BOM = "\uFEFF";
@@ -296,7 +333,6 @@ export default function App() {
     );
   }
 
-  // --- O NOVO PAINEL DE AUDITORIA HFT (PÓS-SESSÃO) ---
   if (data?.session?.status === "CLOSED") {
     if (!auditData) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-indigo-500 font-black animate-pulse">Compilando Auditoria...</div>);
     
@@ -382,9 +418,22 @@ export default function App() {
       <div className="flex-shrink-0 pt-2">
         <HeaderStatus bankroll={currentB} initialBankroll={initialB} zScore={data?.zScore || 0} isConnected={true} />
         
+        {/* PAINEL DE MÉTRICAS C/ CRONÔMETRO (UPTIME) */}
         <div className="mx-4 mt-2 mb-4 bg-gray-950 border border-gray-800 p-2 rounded-lg flex justify-between items-center">
-          <div className="flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">{visualStopLabel}</span><span className={`text-xs font-mono font-bold ${highestB > initialB ? 'text-indigo-400' : 'text-red-400'}`}>R$ {visualStopLimit.toFixed(2)}</span></div>
-          <div className="text-right flex flex-col"><span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span><span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span></div>
+          <div className="flex flex-col">
+            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">{visualStopLabel}</span>
+            <span className={`text-xs font-mono font-bold ${highestB > initialB ? 'text-indigo-400' : 'text-red-400'}`}>R$ {visualStopLimit.toFixed(2)}</span>
+          </div>
+          
+          <div className="flex flex-col items-center border-x border-gray-800 px-3">
+            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Uptime</span>
+            <span className={`text-xs font-mono font-bold ${sessionTime > 45 * 60 * 1000 ? 'text-orange-500 animate-pulse' : 'text-indigo-400'}`}>{formatTime(sessionTime)}</span>
+          </div>
+
+          <div className="text-right flex flex-col">
+            <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Distância Livre</span>
+            <span className="text-xs font-mono text-gray-300">R$ {Math.max(0, distanceToStop).toFixed(2)}</span>
+          </div>
         </div>
 
         {circuitBreaker.active && (
@@ -458,18 +507,6 @@ export default function App() {
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
-
-      <AnimatePresence>
-        {debugInfo.isOpen && (
-          <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 z-50 bg-gray-950/95 p-4 overflow-y-auto backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6 mt-4"><h2 className="text-yellow-500 font-black text-xl uppercase tracking-tighter">Raio-X (Debug OCR)</h2><button onClick={() => setDebugInfo({ ...debugInfo, isOpen: false })} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold uppercase text-xs transition-colors">Fechar</button></div>
-            <div className="space-y-6 pb-20">
-              <div className="bg-black border border-gray-800 rounded-xl p-4"><span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">1. Imagem processada</span>{debugInfo.sentImageBase64 ? (<img src={debugInfo.sentImageBase64} className="w-full rounded border border-gray-700 opacity-80" />) : (<p className="text-red-500 text-xs font-mono">Falha na imagem.</p>)}</div>
-              <div className="bg-black border border-gray-800 rounded-xl p-4"><span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-2">2. Resposta Crua (JSON) da IA</span><pre className="text-yellow-400 font-mono text-[10px] whitespace-pre-wrap break-all bg-gray-900 p-3 rounded border border-yellow-900/50 max-h-40 overflow-y-auto">{debugInfo.rawAiText || "Vazio ou Erro."}</pre></div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {activeModal && (
