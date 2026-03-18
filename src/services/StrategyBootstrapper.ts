@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 const OFFICIAL_STRATEGIES = [
   { name: "Race: Vizinhos 1 & 21", bayes_weight: 1.0 },
   { name: "Race: Fusion", bayes_weight: 1.0 },
+  { name: "Race: P2", bayes_weight: 1.0 },
   { name: "James Bond", bayes_weight: 1.0 },
   { name: "Cross: D1 ➔ Col 2 e 3", bayes_weight: 1.0 },
   { name: "Cross: D2 ➔ Col 1 e 3", bayes_weight: 1.0 },
@@ -14,8 +15,6 @@ const OFFICIAL_STRATEGIES = [
   { name: "Macro: Black + Zero", bayes_weight: 1.0 },
   { name: "Macro: Even + Zero", bayes_weight: 1.0 },
   { name: "Macro: Odd + Zero", bayes_weight: 1.0 },
-  
-  // NOVAS ESTRATÉGIAS DE ELITE (HEDGES ASSIMÉTRICOS E SETORES)
   { name: "Hedge: Red + Col 2 + Zero", bayes_weight: 1.0 },
   { name: "Hedge: Black + Col 3 + Zero", bayes_weight: 1.0 },
   { name: "Macro: Low (1-18) + Zero", bayes_weight: 1.0 },
