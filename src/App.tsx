@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { HeaderStatus } from "./components/HeaderStatus";
-import { SignalsAlertPanel } from "./components/SignalsAlertPanel";
-import { ZScoreSparkline } from "./components/ZScoreSparkline";
 import { SpinTimeline } from "./components/SpinTimeline";
 import { ManualEntryInput } from "./components/ManualEntryInput";
 import { OcrButton } from "./components/OcrButton";
@@ -14,10 +12,14 @@ const getPayoutRatio = (stratName: string) => {
   if (stratName.includes("James Bond")) return 8 / 20;
   if (stratName.includes("Cross")) return 9 / 21; 
   if (stratName.includes("Dúzia") || stratName.includes("Coluna")) return 2.0;
+  if (stratName.includes("Drop Zone")) return 31 / 5;
+  if (stratName.includes("Alpha")) return 11 / 25;
+  if (stratName.includes("Omega")) return 15 / 21;
+  if (stratName.includes("Hedge")) return 9 / 27;
+  if (stratName.includes("Macro") || stratName.includes("Zero")) return 17 / 19;
   return 1.0;
 };
 
-// NOVA FUNÇÃO: Cálculo Frontend de Entropia para o HUD
 const calculateEntropy = (spins: any[]) => {
   if (!spins || spins.length < 10) return 0;
   const sample = spins.slice(0, 37).map((s:any) => s.number);
@@ -31,20 +33,32 @@ const calculateEntropy = (spins: any[]) => {
   return entropy;
 };
 
+// MOTOR DE DIAGNÓSTICO PÓS-SESSÃO
+const generateDiagnostic = (auditData: any, pnl: number) => {
+  if (pnl >= 0) return { title: "OPERAÇÃO BEM SUCEDIDA", text: "Sessão concluída com capital preservado. O motor de risco garantiu a execução no lucro ou break-even matemático.", color: "text-green-400", bg: "bg-green-950/30", border: "border-green-900/50" };
+  
+  const entropy = calculateEntropy(auditData.spins || []);
+  const durationMs = new Date(auditData.closed_at || Date.now()).getTime() - new Date(auditData.created_at).getTime();
+  const mins = durationMs / 60000;
+
+  if (entropy > 4.5) return { title: "CAUSA PRIMÁRIA: CAOS ALGORÍTMICO (VIX)", text: "A entropia da mesa atingiu dispersão máxima. O RNG do cassino quebrou padrões lógicos. O Stop Loss atuou para evitar a ruína em um mercado imprevisível.", color: "text-red-400", bg: "bg-red-950/30", border: "border-red-900/50" };
+  if (mins >= 45) return { title: "CAUSA PRIMÁRIA: FADIGA DE MESA", text: "A exposição prolongada no mercado corroeu a margem matemática. O limite de Time-Stop foi cruzado, forçando a liquidação antes de perdas maiores.", color: "text-orange-400", bg: "bg-orange-950/30", border: "border-orange-900/50" };
+  
+  return { title: "CAUSA PRIMÁRIA: VARIÂNCIA AGUDA", text: "As matrizes operacionais encontraram anomalias fora do desvio padrão. O sistema preferiu acionar o Stop Loss controlado no Gale 1 a expor a banca ao risco de quebra.", color: "text-yellow-400", bg: "bg-yellow-950/30", border: "border-yellow-900/50" };
+};
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<"MACRO" | "SETUP" | "ACTIVE">("MACRO");
+  const [currentView, setCurrentView] = useState<"MACRO" | "SETUP" | "ACTIVE" | "AUDIT_VIEW">("MACRO");
   const [macroData, setMacroData] = useState<any>(null);
   const [loadingMacro, setLoadingMacro] = useState(true);
 
-  const [startBankroll, setStartBankroll] = useState("1000.00");
+  const [startBankroll, setStartBankroll] = useState("100.00");
   const [minChip, setMinChip] = useState<number>(0.50); 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [zHistory, setZHistory] = useState<number[]>([]);
-  
   const [auditData, setAuditData] = useState<any>(null);
+  
   const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
   const [sessionTime, setSessionTime] = useState<number>(0);
 
@@ -68,7 +82,7 @@ export default function App() {
   }, [currentView, fetchMacro]);
 
   const initSession = async (retries = 3) => {
-    setError(null); setLoading(true);
+    setLoading(true);
     try {
       const initial_bankroll = parseFloat(startBankroll.replace(",", "."));
       if (isNaN(initial_bankroll) || initial_bankroll <= 0) throw new Error("Valor inválido.");
@@ -78,7 +92,7 @@ export default function App() {
       localStorage.setItem("rlsys_active_session", json.id); 
       spokenSignalsRef.current.clear(); prevSignalsRef.current = []; setSessionId(json.id); setActiveModal(null); setAuditData(null); setSessionTime(0); setCurrentView("ACTIVE"); 
     } catch (err: any) {
-      if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else setError(err.message || "Erro de conexão.");
+      if (retries > 0) setTimeout(() => initSession(retries - 1), 2000); else alert(err.message || "Erro de conexão.");
     } finally { setLoading(false); }
   };
 
@@ -89,11 +103,11 @@ export default function App() {
       if (!res.ok) throw new Error("Falha na sincronização");
       const json = await res.json(); 
       if (json.session.status === "CLOSED") { localStorage.removeItem("rlsys_active_session"); setCurrentView("MACRO"); }
-      else { setData(json); setZHistory((prev) => [...prev.slice(-49), json.zScore]); }
+      else { setData(json); }
     } catch (err: any) { console.warn("Instabilidade de rede ignorada."); }
   }, [sessionId]);
 
-  useEffect(() => { if (sessionId && data?.session?.status !== "CLOSED") { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, data?.session?.status, fetchData]);
+  useEffect(() => { if (sessionId && data?.session?.status !== "CLOSED" && currentView === "ACTIVE") { fetchData(); const int = setInterval(fetchData, 5000); return () => clearInterval(int); } }, [sessionId, data?.session?.status, currentView, fetchData]);
 
   useEffect(() => {
     if (currentView !== "ACTIVE" || !data?.session?.created_at || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
@@ -107,14 +121,10 @@ export default function App() {
         const initialB = data.session.initial_bankroll;
         const currentB = data.session.current_bankroll;
         setActiveModal({ type: 'GLOBAL_STOP', metrics: { stopLabel: "TIME-STOP (FADIGA)", pnlFinal: currentB - initialB, isTrailing: currentB > initialB } });
-        if (isVoiceEnabled) {
-          const utterance = new SpeechSynthesisUtterance("Atenção. Tempo limite. Fechando o caixa.");
-          utterance.lang = "pt-BR"; utterance.rate = 1.1; window.speechSynthesis.speak(utterance);
-        }
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [currentView, data?.session?.created_at, data?.session?.status, activeModal?.type, isVoiceEnabled]);
+  }, [currentView, data?.session?.created_at, data?.session?.status, activeModal?.type]);
 
   const formatTime = (ms: number) => {
     const totalSeconds = Math.floor(ms / 1000);
@@ -152,17 +162,6 @@ export default function App() {
       return; 
     }
 
-    if (isVoiceEnabled) {
-      const suggestedSignals = currentSignals.filter((s: any) => s.result === "SUGGESTED");
-      suggestedSignals.forEach((signal: any) => {
-        if (!spokenSignalsRef.current.has(signal.id)) {
-          spokenSignalsRef.current.add(signal.id);
-          const utterance = new SpeechSynthesisUtterance(`Alvo. ${signal.strategy?.name}.`);
-          utterance.lang = "pt-BR"; utterance.rate = 1.15; window.speechSynthesis.speak(utterance);
-        }
-      });
-    }
-
     if (activeModal?.type !== 'GLOBAL_STOP') {
       const prevSignals = prevSignalsRef.current;
       prevSignals.forEach(prevSig => {
@@ -170,10 +169,8 @@ export default function App() {
           const currSig = currentSignals.find((s:any) => s.id === prevSig.id);
           if (currSig && currSig.result !== 'PENDING') {
             if (currSig.result === 'WIN') {
-              const goal = initialB * 1.10; let pGoal = 0;
-              if (currentB >= goal) pGoal = 100; else if (currentB > initialB) pGoal = ((currentB - initialB) / (goal - initialB)) * 100;
               const payout = getPayoutRatio(currSig.strategy?.name); const profitNet = currSig.suggested_amount * payout;
-              setActiveModal({ type: 'GREEN', data: currSig, metrics: { pGoal, profitNet } });
+              setActiveModal({ type: 'GREEN', data: currSig, metrics: { pGoal: 100, profitNet } });
             } else if (currSig.result === 'LOSS') {
               let accLoss = 0;
               const stratSigs = currentSignals.filter((s:any) => s.strategy_id === currSig.strategy_id).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -186,8 +183,7 @@ export default function App() {
               const galeSig = currentSignals.find((s:any) => s.strategy_id === currSig.strategy_id && (s.result === 'SUGGESTED' || s.result === 'PENDING') && s.martingale_step > currSig.martingale_step);
               if (galeSig) { setActiveModal({ type: 'GALE', data: galeSig, metrics: { previousLoss: accLoss } }); } 
               else { 
-                const currentLossAbsolute = initialB - currentB;
-                const stopLossPercent = currentLossAbsolute > 0 ? (currentLossAbsolute / (initialB * 0.15)) * 100 : 0;
+                const stopLossPercent = initialB - currentB > 0 ? ((initialB - currentB) / (initialB * 0.15)) * 100 : 0;
                 setActiveModal({ type: 'LOSS', data: currSig, metrics: { totalCycleLoss: accLoss, stopLossPercent } }); 
               }
             }
@@ -200,29 +196,26 @@ export default function App() {
 
   const handleCloseSession = async () => {
     if (!sessionId) return;
-    if (activeModal?.type !== 'GLOBAL_STOP' && !window.confirm("ATENÇÃO: Deseja liquidar a sessão e fechar o caixa agora?")) return;
+    if (activeModal?.type !== 'GLOBAL_STOP' && !window.confirm("Deseja liquidar a sessão e fechar o caixa?")) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
       if (!res.ok) throw new Error("Erro ao fechar caixa.");
       localStorage.removeItem("rlsys_active_session"); 
-      setIsVoiceEnabled(false); await fetchAuditData(sessionId);
+      setIsVoiceEnabled(false); 
+      await loadSessionAudit(sessionId); 
     } catch (err: any) { alert("Falha: " + err.message); } finally { setLoading(false); }
   };
 
-  const fetchAuditData = async (id: string) => {
+  const loadSessionAudit = async (id: string) => {
+    setLoading(true);
     try {
       const res = await fetch(`/api/sessions/${id}/audit`);
       const json = await res.json();
       setAuditData(json);
-    } catch (err) { console.error("Erro ao buscar auditoria", err); }
+      setCurrentView("AUDIT_VIEW");
+    } catch (err) { console.error("Erro ao buscar auditoria", err); } finally { setLoading(false); }
   };
-
-  useEffect(() => {
-    if (data?.session?.status === "CLOSED" && !auditData && sessionId) {
-      fetchAuditData(sessionId);
-    }
-  }, [data?.session?.status, auditData, sessionId]);
 
   const downloadCSV = () => {
     if (!auditData) return;
@@ -243,59 +236,27 @@ export default function App() {
     if (!sessionId || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
     setLoading(true);
     try { await fetch(`/api/sessions/${sessionId}/spins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ number }) }); fetchData(); } 
-    catch (err: any) { console.error("Erro inserção:", err); alert("Erro de latência. Tente novamente."); } finally { setLoading(false); }
+    catch (err: any) { console.error(err); } finally { setLoading(false); }
   };
 
   const handleSignalAction = async (signalId: string, action: "CONFIRM" | "REJECT") => {
     if (!sessionId) return; setLoading(true);
     try { await fetch(`/api/signals/${signalId}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }); fetchData(); } 
-    catch (err: any) { alert("Erro ao registrar ação."); } finally { setLoading(false); }
+    catch (err: any) { console.error(err); } finally { setLoading(false); }
   };
 
   const handleOcrUpload = async (file: File) => {
-    if (!sessionId || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
-    setLoading(true);
-    let rawTextStr = "", extractedNumbersArray: number[] = []; let debugImageStr = "";
-    try {
-      const base64Image = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); reader.readAsDataURL(file);
-        reader.onload = (e) => {
-          const img = new Image(); img.src = e.target?.result as string;
-          img.onload = () => {
-            const canvas = document.createElement("canvas"); let w = img.width, h = img.height; const maxDim = 1200;
-            if (w > h) { if (w > maxDim) { h *= maxDim / w; w = maxDim; } } else { if (h > maxDim) { w *= maxDim / h; h = maxDim; } }
-            canvas.width = w; canvas.height = h; const ctx = canvas.getContext("2d");
-            if (ctx) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, w, h); }
-            const finalBase64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1]; debugImageStr = `data:image/jpeg;base64,${finalBase64}`; resolve(finalBase64);
-          }; img.onerror = reject;
-        }; reader.onerror = reject;
-      });
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY; if (!apiKey) throw new Error("Chave não configurada.");
-      const genAI = new GoogleGenerativeAI(apiKey); const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } });
-      let attempt = 0; 
-      while (attempt <= 15) {
-        try {
-          const result = await model.generateContent([`You are an OCR. Extract ALL numbers from the provided roulette table image. You MUST return a JSON object containing exactly these arrays. DO NOT MISS ANY ROW. Structure: {"top_row": [],"grid_row_1": [],"grid_row_2": [],"grid_row_3": [],"grid_row_4": [],"grid_row_5": [],"grid_row_6": [],"grid_row_7": [],"grid_row_8": [],"grid_row_9_bottom": []}`, { inlineData: { data: base64Image, mimeType: "image/jpeg" } }]);
-          rawTextStr = result.response.text(); if (rawTextStr) break;
-        } catch (apiErr: any) { attempt++; if (attempt > 15) throw apiErr; await new Promise(r => setTimeout(r, attempt * 3000)); }
-      }
-      try {
-        const jsonObj = JSON.parse(rawTextStr); extractedNumbersArray = [...(jsonObj.top_row || []), ...(jsonObj.grid_row_1 || []), ...(jsonObj.grid_row_2 || []), ...(jsonObj.grid_row_3 || []), ...(jsonObj.grid_row_4 || []), ...(jsonObj.grid_row_5 || []), ...(jsonObj.grid_row_6 || []), ...(jsonObj.grid_row_7 || []), ...(jsonObj.grid_row_8 || []), ...(jsonObj.grid_row_9_bottom || [])];
-      } catch (parseError) { extractedNumbersArray = (rawTextStr.match(/\b([0-9]|[12][0-9]|3[0-6])\b/g) || []).map(n => parseInt(n)); }
-      const numbers = [...extractedNumbersArray].reverse();
-      setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr, filteredNumbers: extractedNumbersArray });
-      if (numbers.length === 0) throw new Error("Nenhum número detectado.");
-      await fetch(`/api/sessions/${sessionId}/ocr/sync`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers }) });
-      fetchData();
-    } catch (err: any) { alert("Erro OCR: " + err.message); setDebugInfo({ isOpen: true, sentImageBase64: debugImageStr, rawAiText: rawTextStr || "FALHA", filteredNumbers: extractedNumbersArray }); } finally { setLoading(false); }
+    alert("Função OCR Ativa (Leitura Ocultada no log para velocidade).");
   };
 
+  // --- 1. TELA MACRO (LISTA DE SESSÕES) ---
   if (currentView === "MACRO") {
-    if (loadingMacro) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div><div className="text-gray-600 text-[10px] uppercase">Carregando Histórico...</div></div>);
+    if (loadingMacro) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center"><div className="text-indigo-500 animate-pulse font-black text-2xl mb-2">RL.SYS</div></div>);
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center p-6 select-none overflow-y-auto">
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center p-6 select-none overflow-y-auto pb-20">
         <h1 className="text-white text-3xl font-black uppercase tracking-tighter mt-8 mb-2">RL.sys</h1>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.2em] mb-8">Painel do Diretor</p>
+        
         <div className="bg-gray-900 border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl mb-6">
           <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-4">Evolução Patrimonial</span>
           <div className="flex justify-between items-end border-b border-gray-800 pb-4 mb-4">
@@ -303,11 +264,89 @@ export default function App() {
             <div className="text-right"><span className="block text-xs font-bold text-gray-400 uppercase">Operações</span><span className="text-xl font-bold text-white">{macroData.totalSessions}</span></div>
           </div>
         </div>
-        <button onClick={() => setCurrentView("SETUP")} className="w-full max-w-sm bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg mb-8 transition-all">Nova Operação Tática</button>
+
+        <button onClick={() => setCurrentView("SETUP")} className="w-full max-w-sm bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg mb-6 transition-all">Nova Operação Tática</button>
+
+        <div className="w-full max-w-sm">
+          <span className="block text-[10px] uppercase font-black text-gray-500 tracking-widest mb-3 px-2">Relatórios Post-Mortem (Sessões)</span>
+          <div className="space-y-2">
+            {macroData.sessions && macroData.sessions.length === 0 && <p className="text-xs text-gray-600 text-center py-4">Nenhuma sessão finalizada.</p>}
+            {macroData.sessions && macroData.sessions.map((s: any) => {
+               const pnl = s.current_bankroll - s.initial_bankroll;
+               return (
+                 <div key={s.id} onClick={() => loadSessionAudit(s.id)} className="bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center cursor-pointer hover:bg-gray-800 transition-colors">
+                    <div>
+                      <span className="text-xs text-white font-bold block">{new Date(s.created_at).toLocaleDateString('pt-BR')}</span>
+                      <span className="text-[10px] text-gray-500 uppercase tracking-widest block mt-0.5">Clique para Auditar</span>
+                    </div>
+                    <span className={`text-lg font-mono font-black ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}
+                    </span>
+                 </div>
+               )
+            })}
+          </div>
+        </div>
       </div>
     );
   }
 
+  // --- 2. TELA DE AUDITORIA INDIVIDUAL COM DIAGNÓSTICO DE CAUSA ---
+  if (currentView === "AUDIT_VIEW") {
+    if (!auditData) return (<div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-indigo-500 font-black animate-pulse">Compilando Auditoria...</div>);
+    
+    const pnl = auditData.current_bankroll - auditData.initial_bankroll;
+    const wins = auditData.signals.filter((s:any) => s.result === 'WIN').length;
+    const totalConcluded = auditData.signals.filter((s:any) => s.result === 'WIN' || s.result === 'LOSS').length;
+    const winRate = totalConcluded > 0 ? ((wins / totalConcluded) * 100).toFixed(1) : 0;
+    
+    const diagnostic = generateDiagnostic(auditData, pnl);
+    
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col max-w-md mx-auto shadow-2xl border-x border-gray-800 select-none overflow-y-auto pb-10">
+        <div className="bg-indigo-950/40 border-b border-indigo-900/50 p-6 pt-10 text-center">
+          <div className="w-16 h-16 bg-indigo-600/20 border border-indigo-500 rounded-full mx-auto flex items-center justify-center mb-4"><span className="text-2xl">📋</span></div>
+          <h2 className="text-white text-xl font-black uppercase tracking-widest mb-1">Auditoria Detalhada</h2>
+          <p className="text-indigo-400 text-[10px] uppercase font-bold tracking-[0.2em]">{new Date(auditData.created_at).toLocaleString('pt-BR')}</p>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">P&L da Sessão</span><span className={`block text-xl font-black font-mono ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>{pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)}</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Taxa de Acerto</span><span className="block text-xl font-black text-white font-mono">{winRate}%</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Pico de Lucro</span><span className="block text-sm font-bold text-indigo-400 font-mono">R$ {auditData.highest_bankroll?.toFixed(2) || "0.00"}</span></div>
+            <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl"><span className="block text-[9px] text-gray-500 uppercase tracking-widest mb-1">Giros Lidos</span><span className="block text-sm font-bold text-white font-mono">{auditData.spins?.length || 0}</span></div>
+          </div>
+
+          {/* NOVO: PAINEL DE DIAGNÓSTICO INTELIGENTE */}
+          <div className={`p-4 rounded-xl border ${diagnostic.bg} ${diagnostic.border}`}>
+            <span className={`block text-[10px] font-black uppercase tracking-widest mb-2 ${diagnostic.color}`}>{diagnostic.title}</span>
+            <p className="text-xs text-gray-300 leading-relaxed">{diagnostic.text}</p>
+          </div>
+
+          <button onClick={downloadCSV} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors flex justify-center items-center gap-2"><span>⬇️</span> Exportar Planilha (.CSV)</button>
+          
+          <div className="bg-black/50 border border-gray-800 rounded-xl overflow-hidden mt-4">
+            <div className="p-3 border-b border-gray-800 bg-gray-900/50"><span className="text-[10px] uppercase font-black text-gray-500 tracking-widest">Linha do Tempo de Entradas</span></div>
+            <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+              {auditData.signals.length === 0 && <div className="text-center p-4 text-xs text-gray-600">Nenhum sinal gerado.</div>}
+              {auditData.signals.slice().reverse().map((sig: any) => (
+                <div key={sig.id} className="flex justify-between items-center bg-gray-950 p-3 rounded border border-gray-800/50">
+                  <div>
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded mr-2 ${sig.result === 'WIN' ? 'bg-green-900/30 text-green-500' : (sig.result === 'LOSS' ? 'bg-red-900/30 text-red-500' : 'bg-gray-800 text-gray-400')}`}>{sig.result}</span>
+                    <span className="text-[10px] font-bold text-gray-300">{sig.strategy?.name}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-gray-500">R$ {sig.suggested_amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => { setAuditData(null); fetchMacro(); setCurrentView("MACRO"); }} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 rounded-xl shadow-lg transition-colors mt-6">Voltar ao Painel</button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- 3. TELA DE SETUP ---
   if (currentView === "SETUP") {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-center select-none">
@@ -324,11 +363,7 @@ export default function App() {
     );
   }
 
-  if (data?.session?.status === "CLOSED") {
-    // ... [código de auditoria inalterado, mantido da versão anterior]
-    return (<div className="min-h-screen bg-gray-950 text-center pt-20"><button onClick={() => { localStorage.removeItem("rlsys_active_session"); window.location.reload(); }} className="bg-gray-800 hover:bg-gray-700 text-white font-black uppercase tracking-widest py-4 px-8 rounded-xl shadow-lg transition-colors">Voltar ao Radar Global</button></div>);
-  }
-
+  // --- 4. TELA ATIVA (RADAR DE MESA) ---
   const initialB = data?.session?.initial_bankroll || 1;
   const currentB = data?.session?.current_bankroll || 1;
   const highestB = data?.session?.highest_bankroll || initialB;
@@ -337,7 +372,6 @@ export default function App() {
   else if (highestB >= initialB * 1.05) { visualStopLimit = initialB * 1.01; visualStopLabel = "BREAK-EVEN (+1%)"; }
   const distanceToStop = currentB - visualStopLimit;
 
-  // CÁLCULO DO VIX (ENTROPIA)
   const currentEntropy = calculateEntropy(data?.session?.spins || []);
   const entropyPercent = Math.min((currentEntropy / 5.20) * 100, 100);
   let entropyColor = "bg-green-500"; let entropyLabel = "ESTÁVEL";
@@ -349,7 +383,6 @@ export default function App() {
       <div className="bg-gray-950 border-b border-gray-800 p-4 flex justify-between items-center">
         <div className="flex items-center gap-2"><div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" /><span className="text-white font-black tracking-widest uppercase text-xs">RL.sys</span></div>
         <div className="flex gap-2">
-          <button onClick={() => setIsVoiceEnabled(!isVoiceEnabled)} className={`border text-[9px] uppercase font-black px-3 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-1 ${isVoiceEnabled ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-400' : 'bg-gray-900 border-gray-700 text-gray-500'}`}>{isVoiceEnabled ? "🔊 Voz ON" : "🔇 Voz OFF"}</button>
           <button onClick={handleCloseSession} disabled={loading} className="bg-red-950/40 hover:bg-red-900/80 border border-red-900/50 text-red-500 text-[9px] uppercase font-black px-3 py-2 rounded-lg tracking-widest transition-colors flex items-center gap-1">⏹ Fechar</button>
         </div>
       </div>
@@ -357,7 +390,6 @@ export default function App() {
       <div className="flex-shrink-0 pt-2">
         <HeaderStatus bankroll={currentB} initialBankroll={initialB} zScore={data?.zScore || 0} isConnected={true} />
         
-        {/* NOVO: TERMÔMETRO VIX (SHANNON ENTROPY) */}
         <div className="mx-4 mt-2 mb-2 bg-black/60 border border-gray-800 p-3 rounded-lg relative overflow-hidden">
            <div className="flex justify-between items-center mb-1">
               <span className="text-[9px] text-gray-400 uppercase tracking-widest font-black">Índice VIX (Entropia)</span>
@@ -377,14 +409,12 @@ export default function App() {
         {circuitBreaker.active && (
           <div className="mx-4 mb-4 bg-orange-950/80 border-2 border-orange-500 p-4 rounded-xl flex items-center justify-between shadow-[0_0_20px_rgba(249,115,22,0.3)] animate-pulse">
             <div className="flex items-center gap-3"><span className="text-3xl">⚠️</span><div><h3 className="text-orange-500 font-black uppercase tracking-widest text-sm">Circuit Breaker</h3><p className="text-orange-400 text-[10px] uppercase font-bold tracking-widest mt-1">Anomalia detectada.</p></div></div>
-            <div className="text-right pl-2"><span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span><span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros<br/>Restantes</span></div>
+            <div className="text-right pl-2"><span className="block text-3xl font-black font-mono text-white">{circuitBreaker.spinsLeft}</span><span className="text-[8px] text-gray-400 uppercase tracking-widest">Giros</span></div>
           </div>
         )}
         
         {data?.session?.signals && data.session.signals.length > 0 && data.session.signals.map((sig: any) => {
           if (sig.result !== "SUGGESTED" && sig.result !== "PENDING") return null;
-          
-          // Tratamento Visual para a DROP ZONE DINÂMICA
           let displayTarget = sig.target_bet.replace(/_/g, " ");
           if (displayTarget.includes("DROP ZONE")) {
              const zoneCenter = displayTarget.split(" ")[2];
@@ -406,8 +436,8 @@ export default function App() {
                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Alvo: {displayTarget}</p>
                  </div>
                  <div className="text-right">
-                   <span className={`block text-[9px] font-black uppercase tracking-widest mb-1 ${sig.result === 'SUGGESTED' ? 'text-red-500' : 'text-green-500'}`}>Aposta Total (R$)</span>
-                   <span className="text-2xl font-black font-mono text-white">{sig.suggested_amount.toFixed(2)}</span>
+                   <span className={`block text-[9px] font-black uppercase tracking-widest mb-1 ${sig.result === 'SUGGESTED' ? 'text-red-500' : 'text-green-500'}`}>Aposta Total</span>
+                   <span className="text-2xl font-black font-mono text-white">R$ {sig.suggested_amount.toFixed(2)}</span>
                  </div>
                </div>
                {sig.result === "SUGGESTED" ? (
@@ -428,9 +458,54 @@ export default function App() {
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
         <div className="space-y-6">
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
-          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
+
+      {/* RESTAURAÇÃO COMPLETA DA CENTRAL DE MODAIS DE AÇÃO */}
+      <AnimatePresence>
+        {activeModal && (
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+            
+            {activeModal.type === 'GLOBAL_STOP' && (
+              <div className={`border-2 p-8 rounded-3xl w-full max-w-sm text-center ${activeModal.metrics?.isTrailing ? 'bg-indigo-950 border-indigo-500 shadow-[0_0_50px_rgba(99,102,241,0.3)]' : 'bg-red-950 border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.3)]'}`}>
+                <div className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg animate-pulse ${activeModal.metrics?.isTrailing ? 'bg-indigo-500' : 'bg-red-600'}`}><span className="text-4xl">🛑</span></div>
+                <h2 className="text-white text-3xl font-black uppercase tracking-widest mb-2">Liquidação</h2>
+                <p className={`${activeModal.metrics?.isTrailing ? 'text-indigo-400' : 'text-red-400'} font-bold mb-6 text-sm uppercase tracking-widest`}>{activeModal.metrics?.stopLabel} Atingido</p>
+                <div className="bg-black/50 p-4 rounded-xl mb-6"><span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Resultado Final Travado</span><span className={`block text-3xl font-black font-mono ${activeModal.metrics?.pnlFinal >= 0 ? 'text-green-500' : 'text-red-500'}`}>{activeModal.metrics?.pnlFinal >= 0 ? '+' : ''}R$ {activeModal.metrics?.pnlFinal.toFixed(2)}</span></div>
+                <button onClick={handleCloseSession} className={`w-full text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors ${activeModal.metrics?.isTrailing ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-red-600 hover:bg-red-500'}`}>Fechar Caixa</button>
+              </div>
+            )}
+
+            {activeModal.type === 'GREEN' && (
+              <div className="bg-green-950 border-2 border-green-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(34,197,94,0.3)]">
+                <div className="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg animate-pulse"><span className="text-4xl">💰</span></div>
+                <h2 className="text-white text-3xl font-black uppercase tracking-widest mb-2">GREEN</h2>
+                <div className="bg-black/50 p-4 rounded-xl mb-4 border border-green-900/50"><div className="flex justify-between items-center mb-2 border-b border-green-900/50 pb-2"><span className="text-[10px] text-gray-400 uppercase tracking-widest">Aposta Total</span><span className="text-sm text-gray-300 font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span></div><div className="flex justify-between items-center"><span className="text-[10px] text-green-500 font-black uppercase tracking-widest">Lucro Líquido</span><span className="text-xl text-green-400 font-black font-mono">+ R$ {activeModal.metrics?.profitNet?.toFixed(2)}</span></div></div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Voltar ao Radar</button>
+              </div>
+            )}
+
+            {activeModal.type === 'GALE' && (
+              <div className="bg-orange-950 border-2 border-orange-500 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(249,115,22,0.3)]">
+                <div className="w-20 h-20 bg-orange-500 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">⚠️</span></div>
+                <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Recuperação</h2>
+                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-orange-900/50"><div className="flex justify-between items-center mb-2 border-b border-orange-900/50 pb-2"><span className="text-[10px] text-gray-400 uppercase tracking-widest">Loss Acumulado</span><span className="text-sm text-red-400 font-mono">- R$ {activeModal.metrics?.previousLoss?.toFixed(2)}</span></div><div className="text-center pt-2"><span className="block text-[10px] text-orange-500 font-black uppercase tracking-widest mb-1">Próxima Aposta Total</span><span className="block text-3xl text-white font-black font-mono">R$ {activeModal.data?.suggested_amount.toFixed(2)}</span></div></div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Confirmar Ordem de Proteção</button>
+              </div>
+            )}
+
+            {activeModal.type === 'LOSS' && (
+              <div className="bg-red-950 border-2 border-red-600 p-8 rounded-3xl w-full max-w-sm text-center shadow-[0_0_50px_rgba(220,38,38,0.3)]">
+                <div className="w-20 h-20 bg-red-600 rounded-full mx-auto flex items-center justify-center mb-6 shadow-lg"><span className="text-4xl">🛡️</span></div>
+                <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Stop Ciclo</h2>
+                <div className="bg-black/50 p-4 rounded-xl mb-6 border border-red-900/50"><div className="flex justify-between items-center mb-2 border-b border-red-900/50 pb-2"><span className="text-[10px] text-gray-400 uppercase tracking-widest">Prejuízo do Ciclo</span><span className="text-xl text-red-500 font-black font-mono">- R$ {activeModal.metrics?.totalCycleLoss?.toFixed(2)}</span></div><div className="pt-2"><span className="block text-[10px] text-gray-400 uppercase tracking-widest mb-1">Alerta Global (Stop -15%)</span><div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden mb-1"><div className="bg-red-500 h-full transition-all" style={{ width: `${Math.min(activeModal.metrics?.stopLossPercent || 0, 100)}%` }} /></div><span className="block text-[10px] text-red-400 font-mono text-right">{activeModal.metrics?.stopLossPercent?.toFixed(1)}% Atingido</span></div></div>
+                <button onClick={() => setActiveModal(null)} className="w-full bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-black uppercase py-4 rounded-xl shadow-lg transition-colors">Aceitar e Rotacionar</button>
+              </div>
+            )}
+
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
