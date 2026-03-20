@@ -21,20 +21,13 @@ const OFFICIAL_STRATEGIES = [
   { name: "Macro: High (19-36) + Zero", bayes_weight: 1.0 },
   { name: "Race: Sector Alpha", bayes_weight: 1.0 },
   { name: "Race: Sector Omega", bayes_weight: 1.0 },
-  
-  // NOVA ARMA: IA FÍSICA
   { name: "Dynamic: Drop Zone", bayes_weight: 1.0 }
 ];
 
 export async function syncStrategiesToDatabase(prisma: PrismaClient) {
   try {
     const officialNames = OFFICIAL_STRATEGIES.map(s => s.name);
-
-    await prisma.strategy.updateMany({
-      where: { name: { notIn: officialNames } },
-      data: { is_active: false }
-    });
-
+    await prisma.strategy.updateMany({ where: { name: { notIn: officialNames } }, data: { is_active: false } });
     for (const strategy of OFFICIAL_STRATEGIES) {
       await prisma.strategy.upsert({
         where: { name: strategy.name },
