@@ -153,27 +153,18 @@ app.post("/api/signals/:id/action", async (req, res) => {
 });
 
 // ==========================================
-// ROTEAMENTO DE PRODUÇÃO (BLINDADO CONTRA BUG DE MIME DO TERMUX)
+// ROTEAMENTO DE PRODUÇÃO PADRÃO
 // ==========================================
-const distPath = path.join(process.cwd(), "dist");
-
-app.use("/assets", express.static(path.join(distPath, "assets"), {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith(".css")) res.setHeader("Content-Type", "text/css");
-    if (filePath.endsWith(".js")) res.setHeader("Content-Type", "application/javascript");
-  }
-}));
-
-app.use(express.static(distPath));
+app.use(express.static(path.join(process.cwd(), "dist")));
 
 app.get("*", (req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
+  res.sendFile(path.join(process.cwd(), "dist", "index.html"));
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`\n[RL.SYS HFT] Servidor Operacional Iniciado.`);
-  console.log(`[NETWORK] Roteamento blindado ativo na porta: ${PORT}`);
+  console.log(`[NETWORK] Roteamento ativo na porta: ${PORT}`);
   await syncStrategiesToDatabase(prisma);
   console.log(`[BOOTSTRAP] Rede Neural Carregada com Sucesso.\n`);
 });
