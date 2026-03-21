@@ -30,15 +30,12 @@ export class StrategyOrchestrator {
     "Macro: Black + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "BLACK_MAIS_ZERO", checkWin: (n) => BLACK_NUMBERS.includes(n) || n === 0 },
     "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
     "Macro: Odd + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "ODD_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 !== 0) || n === 0 },
-
     "Hedge: Red + Col 2 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_RED_COL2", checkWin: (n) => RED_NUMBERS.includes(n) || (n % 3 === 2) || n === 0 },
     "Hedge: Black + Col 3 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_BLACK_COL3", checkWin: (n) => BLACK_NUMBERS.includes(n) || (n % 3 === 0) || n === 0 },
     "Macro: Low (1-18) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "LOW_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 18) || n === 0 },
     "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
-    
-    // DROP ZONE DINÂMICA (Paga 31 lucro / 5 apostadas = 6.2 Ratio). A função checkWin é customizada no momento da resolução.
     "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false }
   };
 
@@ -49,7 +46,6 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
-  // --- IA DE FÍSICA QUANTICA (Rastreio de Cilindro) ---
   public static calculatePhysicalDropZone(history: number[]): number | null {
     if (history.length < 5) return null;
     const getDistance = (n1: number, n2: number) => {
@@ -66,7 +62,6 @@ export class StrategyOrchestrator {
     return null;
   }
 
-  // --- IA DE ENTROPIA DE SHANNON (Termômetro de Caos) ---
   public static calculateShannonEntropy(history: number[]): number {
     if (history.length < 10) return 0;
     const sample = history.slice(0, 37);
@@ -89,11 +84,11 @@ export class StrategyOrchestrator {
     return (actualHits - expectedHits) / standardDeviation;
   }
 
-  private static getDozenMacroState(n: number): number {
+  public static getDozenMacroState(n: number): number {
     if (n === 0) return 0; if (n <= 12) return 1; if (n <= 24) return 2; return 3;
   }
 
-  private static calculateMarkovProbability(history: number[], config: StrategyConfig): number {
+  public static calculateMarkovProbability(history: number[], config: StrategyConfig): number {
     const theoreticalProb = config.coverage / 37;
     if (history.length < 5) return theoreticalProb; 
     const currentMacroState = this.getDozenMacroState(history[0]);
@@ -105,7 +100,7 @@ export class StrategyOrchestrator {
     return winsImmediatelyAfter / occurrences; 
   }
 
-  private static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
+  public static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired; 
     const optimalExposure = bankroll * 0.015; 
     if (optimalExposure < absoluteMinBet) return absoluteMinBet; 
@@ -114,7 +109,7 @@ export class StrategyOrchestrator {
     return multiplierSteps * absoluteMinBet; 
   }
 
-  private static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
+  public static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
     let exactBet = (accumulatedLoss + absoluteMinBet) / config.payoutRatio;
     const absoluteMaxBet = bankroll * 0.10; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
@@ -128,14 +123,12 @@ export class StrategyOrchestrator {
       if (activeSignals.length === 0) return;
 
       let totalProfitDelta = 0;
-      
       for (const sig of activeSignals) {
         if (sig.result === "SUGGESTED") {
           await prisma.signal.update({ where: { id: sig.id }, data: { result: "MISSED" } });
         } else if (sig.result === "PENDING") {
           let isWin = false;
           const config = this.getConfig(sig.strategy.name);
-          
           if (sig.strategy.name === "Dynamic: Drop Zone") {
              const targetNum = parseInt(sig.target_bet.split("_")[2]);
              const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
@@ -144,12 +137,10 @@ export class StrategyOrchestrator {
           } else {
              isWin = config.checkWin(newNumber);
           }
-
           const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
           totalProfitDelta += profitNet;
           await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
 
-          // INFERÊNCIA BAYESIANA: A máquina aprende alterando o peso da estratégia no DB
           let newWeight = sig.strategy.bayes_weight + (isWin ? 0.05 : -0.15);
           newWeight = Math.max(0.5, Math.min(newWeight, 2.5));
           await prisma.strategy.update({ where: { id: sig.strategy.id }, data: { bayes_weight: newWeight }});
@@ -172,12 +163,8 @@ export class StrategyOrchestrator {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
       if (spinNumbersTimeline.length < 10) return; 
 
-      // IA SHANNON ENTROPY: Bloqueia a máquina em mares revoltos (> 4.6)
       const entropy = this.calculateShannonEntropy(spinNumbersTimeline);
-      if (entropy > 4.60) {
-         console.log(`[SHANNON ENTROPY] Nível Crítico (${entropy.toFixed(2)}). IA abortou entradas por risco de Caos Algorítmico.`);
-         return;
-      }
+      if (entropy > 4.60) return; // Caos. Bloqueia operações.
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
@@ -204,7 +191,6 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // IA TRACKING FÍSICO: Assinatura do Crupiê override supremo
       const dropZoneTarget = this.calculatePhysicalDropZone(spinNumbersTimeline);
       if (dropZoneTarget !== null) {
          const dropStrategy = activeStrategies.find(s => s.name === "Dynamic: Drop Zone");
@@ -226,8 +212,7 @@ export class StrategyOrchestrator {
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number }[] = [];
 
       for (const strategy of activeStrategies) {
-        if (strategy.name === "Dynamic: Drop Zone") continue; // Avaliada separadamente acima
-        
+        if (strategy.name === "Dynamic: Drop Zone") continue; 
         const config = this.getConfig(strategy.name);
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -262,7 +247,6 @@ export class StrategyOrchestrator {
         return true;
       });
 
-      // EQUAÇÃO DE CONFLUÊNCIA COM INFERÊNCIA BAYESIANA
       validCandidates.sort((a, b) => {
         const scoreA = (a.zScore - a.markovProb) * a.strategy.bayes_weight;
         const scoreB = (b.zScore - b.markovProb) * b.strategy.bayes_weight;
@@ -270,7 +254,6 @@ export class StrategyOrchestrator {
       });
       
       const topCandidate = validCandidates[0]; 
-
       if (topCandidate) {
         const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
