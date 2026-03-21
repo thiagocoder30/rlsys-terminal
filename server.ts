@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -5,6 +6,7 @@ import { PrismaClient } from "@prisma/client";
 import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
 import { SimulationEngine } from "./src/services/SimulationEngine";
 import { syncStrategiesToDatabase } from "./src/services/StrategyBootstrapper";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -12,6 +14,41 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
+// ==========================================
+// ROTA BLINDADA DE OCR (INTELIGÊNCIA ARTIFICIAL NO BACK-END)
+// ==========================================
+app.post("/api/ocr", async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) throw new Error("Imagem não fornecida ao servidor.");
+
+    const apiKey = process.env.VITE_GEMINI_API_KEY; 
+    if (!apiKey) throw new Error("Chave da API do Gemini ausente no servidor (Verifique o arquivo .env).");
+
+    const genAI = new GoogleGenerativeAI(apiKey); 
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-3-flash-preview", 
+      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } 
+    });
+    
+    const result = await model.generateContent([
+      `You are an OCR. Extract ALL numbers from the provided roulette image. Return JSON: {"numbers": []}`, 
+      { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
+    ]);
+    
+    const jsonObj = JSON.parse(result.response.text());
+    const numbers = [...(jsonObj.numbers || [])].reverse(); 
+    if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA.");
+    
+    res.json({ numbers });
+  } catch (error: any) { 
+    res.status(500).json({ error: error.message }); 
+  }
+});
+
+// ==========================================
+// ROTAS DO HFT
+// ==========================================
 app.get("/api/macro", async (req, res) => {
   try {
     const sessions = await prisma.session.findMany({ where: { status: "CLOSED" }, orderBy: { created_at: "desc" } });
@@ -116,7 +153,7 @@ app.post("/api/signals/:id/action", async (req, res) => {
 });
 
 // ==========================================
-// ROTEAMENTO DE ALTA PERFORMANCE (CAMPO DE BATALHA)
+// ROTEAMENTO DE PRODUÇÃO (FRONT-END)
 // ==========================================
 app.use(express.static(path.join(process.cwd(), "dist")));
 app.get("*", (req, res) => {
