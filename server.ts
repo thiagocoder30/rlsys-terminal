@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
 import { PrismaClient } from "@prisma/client";
 import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
 import { SimulationEngine } from "./src/services/SimulationEngine";
@@ -112,6 +113,14 @@ app.post("/api/signals/:id/action", async (req, res) => {
     else if (action === "REJECT") await prisma.signal.update({ where: { id }, data: { result: "MISSED" } });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+// ==========================================
+// ROTEAMENTO DE ALTA PERFORMANCE (CAMPO DE BATALHA)
+// ==========================================
+app.use(express.static(path.join(process.cwd(), "dist")));
+app.get("*", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "dist", "index.html"));
 });
 
 const PORT = process.env.PORT || 3000;
