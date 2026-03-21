@@ -3,8 +3,7 @@ import { HeaderStatus } from "./components/HeaderStatus";
 import { SpinTimeline } from "./components/SpinTimeline";
 import { ManualEntryInput } from "./components/ManualEntryInput";
 import { OcrButton } from "./components/OcrButton";
-import { motion, AnimatePresence } from "motion/react";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { motion, AnimatePresence } from "framer-motion";
 
 const getPayoutRatio = (stratName: string) => {
   if (!stratName) return 1.0;
@@ -126,11 +125,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentView, data, activeModal?.type]);
 
-  const formatTime = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000); const minutes = Math.floor(totalSeconds / 60); const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
-
   useEffect(() => {
     if (!data?.session || data.session.status === "CLOSED") return;
     const initialB = data.session.initial_bankroll;
@@ -215,6 +209,9 @@ export default function App() {
     catch (err: any) {} finally { setLoading(false); }
   };
 
+  // ==========================================
+  // NOVA COMUNICAÇÃO FRONT -> BACK (SEM CHAVES)
+  // ==========================================
   const processOCR = async (file: File): Promise<number[]> => {
     const base64Image = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader(); reader.readAsDataURL(file);
@@ -230,14 +227,16 @@ export default function App() {
       }; reader.onerror = reject;
     });
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY; if (!apiKey) throw new Error("Chave do OCR ausente.");
-    const genAI = new GoogleGenerativeAI(apiKey); const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview", generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } });
-    
-    const result = await model.generateContent([`You are an OCR. Extract ALL numbers from the provided roulette image. Return JSON: {"numbers": []}`, { inlineData: { data: base64Image, mimeType: "image/jpeg" } }]);
-    const jsonObj = JSON.parse(result.response.text());
-    const numbers = [...(jsonObj.numbers || [])].reverse(); 
-    if (numbers.length === 0) throw new Error("Nenhum número detectado.");
-    return numbers;
+    // Envia a imagem para o nosso próprio Cérebro blindado
+    const response = await fetch("/api/ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: base64Image })
+    });
+
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.error || "Erro no servidor ao ler OCR.");
+    return json.numbers;
   };
 
   const handleOcrSimulatorUpload = async (file: File) => {
