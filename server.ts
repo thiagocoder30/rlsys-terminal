@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
-// ROTA BLINDADA DE OCR (INTELIGÊNCIA ARTIFICIAL NO BACK-END)
+// ROTA BLINDADA DE OCR (COM FILTRO DE LIMPEZA DE MARKDOWN)
 // ==========================================
 app.post("/api/ocr", async (req, res) => {
   try {
@@ -36,7 +36,11 @@ app.post("/api/ocr", async (req, res) => {
       { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
     ]);
     
-    const jsonObj = JSON.parse(result.response.text());
+    // O FILTRO DE LIMPEZA ABSOLUTA
+    let rawText = result.response.text();
+    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    
+    const jsonObj = JSON.parse(rawText);
     const numbers = [...(jsonObj.numbers || [])].reverse(); 
     if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA.");
     
