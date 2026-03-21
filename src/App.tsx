@@ -209,9 +209,6 @@ export default function App() {
     catch (err: any) {} finally { setLoading(false); }
   };
 
-  // ==========================================
-  // NOVA COMUNICAÇÃO FRONT -> BACK (SEM CHAVES)
-  // ==========================================
   const processOCR = async (file: File): Promise<number[]> => {
     const base64Image = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader(); reader.readAsDataURL(file);
@@ -227,7 +224,6 @@ export default function App() {
       }; reader.onerror = reject;
     });
 
-    // Envia a imagem para o nosso próprio Cérebro blindado
     const response = await fetch("/api/ocr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
