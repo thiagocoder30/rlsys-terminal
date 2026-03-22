@@ -1,102 +1,104 @@
-// src/components/HawkEye.tsx
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useRef, useEffect } from 'react';
+import { Play, Square, Activity, AlertTriangle } from 'lucide-react';
 
-export const HawkEye = ({ onCapture, isProcessing }: { onCapture: (base64: string) => void, isProcessing: boolean }) => {
-  const [isWatching, setIsWatching] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastPixelData = useRef<Uint8ClampedArray | null>(null);
+interface HawkEyeProps {
+  sessionId: string;
+  onNumbersDetected: () => void;
+}
 
-  const startRadar = async () => {
-    try {
-      setErrorMsg("");
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "browser" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setIsWatching(true);
+export const HawkEye: React.FC<HawkEyeProps> = ({ sessionId, onNumbersDetected }) => {
+  const [isScanning, setIsScanning] = useState(false);
+  const [status, setStatus] = useState<string>("AGUARDANDO ATIVAÇÃO");
+  const [error, setError] = useState<string | null>(null);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startAutonomousScan = async () => {
+    setIsScanning(true);
+    setError(null);
+    setStatus("RADAR ATIVO: VARRENDO A MESA...");
+
+    // Loop de varredura autônoma (dispara a cada 8 segundos para cruzar com o tempo do giro real)
+    scanIntervalRef.current = setInterval(async () => {
+      try {
+        setStatus("CAPTURANDO TELA VIA ADB...");
+        
+        // 1. Ordem de disparo para o Cérebro (Back-end) tirar a foto nativa
+        const radarResponse = await fetch('/api/radar/scan');
+        if (!radarResponse.ok) {
+          throw new Error("Falha na varredura. Aguardando próximo ciclo...");
+        }
+        
+        const radarData = await radarResponse.json();
+        
+        if (radarData.numbers && radarData.numbers.length > 0) {
+          setStatus(`ÚLTIMOS NÚMEROS: ${radarData.numbers.join(', ')}`);
+          
+          // 2. Transmite os dados mastigados para sincronizar a sessão
+          await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ numbers: radarData.numbers })
+          });
+          
+          onNumbersDetected(); // Atualiza a tela de sinais do usuário
+        }
+      } catch (err: any) {
+        console.error("[HAWK-EYE ERROR]:", err);
+        setStatus("VARREDURA EM ANDAMENTO...");
+        // Mantemos o radar rodando. Se uma foto sair embaçada, ele acerta na próxima.
       }
-    } catch (err: any) {
-      setIsWatching(false);
-      setErrorMsg("Navegador bloqueou a captura (Restrição do Android).");
-    }
+    }, 8000); 
   };
 
-  const stopRadar = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach(track => track.stop());
-      videoRef.current.srcObject = null;
+  const stopScan = () => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
     }
-    setIsWatching(false);
-    lastPixelData.current = null;
+    setIsScanning(false);
+    setStatus("RADAR DESATIVADO");
   };
 
   useEffect(() => {
-    if (!isWatching) return;
-    
-    const interval = setInterval(() => {
-      if (isProcessing || !videoRef.current || !canvasRef.current) return;
-      
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      
-      if (!ctx || video.videoWidth === 0) return;
-      
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Captura uma amostra em baixa resolução para comparar os pixels (Sensor de Movimento)
-      const sampleCanvas = document.createElement("canvas");
-      sampleCanvas.width = 100; sampleCanvas.height = 100;
-      const sampleCtx = sampleCanvas.getContext("2d");
-      if (!sampleCtx) return;
-      sampleCtx.drawImage(canvas, 0, 0, 100, 100);
-      
-      const currentPixels = sampleCtx.getImageData(0, 0, 100, 100).data;
-      
-      if (lastPixelData.current) {
-        let diff = 0;
-        for (let i = 0; i < currentPixels.length; i += 4) {
-          diff += Math.abs(currentPixels[i] - lastPixelData.current[i]) +
-                  Math.abs(currentPixels[i+1] - lastPixelData.current[i+1]) +
-                  Math.abs(currentPixels[i+2] - lastPixelData.current[i+2]);
-        }
-        const diffPercentage = diff / (currentPixels.length / 4 * 255 * 3);
-        
-        // Se a tela mudar mais de 1%, o crupiê girou a roleta! Dispara o OCR.
-        if (diffPercentage > 0.01) {
-          const base64Image = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
-          onCapture(base64Image);
-        }
-      }
-      lastPixelData.current = currentPixels;
-      
-    }, 5000); // Checa a tela a cada 5 segundos
-
-    return () => clearInterval(interval);
-  }, [isWatching, isProcessing, onCapture]);
+    return () => {
+      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+    };
+  }, []);
 
   return (
-    <div className="bg-gray-900 border border-indigo-900/50 p-4 rounded-xl text-center shadow-lg relative overflow-hidden">
-      {isWatching && <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 animate-pulse" />}
-      <span className="block text-[10px] uppercase font-black tracking-widest mb-3 text-indigo-400">Radar Hawk-Eye (Autônomo)</span>
+    <div className="bg-[#0f172a] rounded-xl border border-blue-900/50 p-6 flex flex-col items-center justify-center space-y-4 shadow-[0_0_15px_rgba(30,58,138,0.3)]">
+      <div className="flex items-center space-x-3 mb-2">
+        <Activity className={`w-6 h-6 ${isScanning ? 'text-green-500 animate-pulse' : 'text-slate-500'}`} />
+        <h3 className="text-lg font-bold text-slate-200 tracking-wider">RADAR HAWK-EYE (ADB)</h3>
+      </div>
       
-      <video ref={videoRef} className="hidden" muted playsInline />
-      <canvas ref={canvasRef} className="hidden" />
+      {error && (
+        <div className="flex items-center space-x-2 text-red-400 bg-red-950/30 px-4 py-2 rounded-lg border border-red-900/50">
+          <AlertTriangle className="w-4 h-4" />
+          <span className="text-sm font-medium">{error}</span>
+        </div>
+      )}
 
-      {errorMsg && <p className="text-[9px] text-red-500 font-bold mb-2 uppercase">{errorMsg}</p>}
+      <div className="w-full bg-slate-900 rounded-lg p-3 text-center border border-slate-800">
+        <span className={`text-sm font-mono ${isScanning ? 'text-blue-400' : 'text-slate-500'}`}>
+          {status}
+        </span>
+      </div>
 
-      {!isWatching ? (
-        <button onClick={startRadar} className="w-full bg-indigo-600/30 border border-indigo-500 hover:bg-indigo-600 text-white text-xs font-black uppercase py-3 rounded-lg transition-all flex items-center justify-center gap-2">
-          👁️ Ligar Radar Contínuo
+      {!isScanning ? (
+        <button
+          onClick={startAutonomousScan}
+          className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold tracking-widest flex items-center justify-center space-x-2 transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)]"
+        >
+          <Play className="w-5 h-5 fill-current" />
+          <span>LIGAR RADAR AUTÔNOMO</span>
         </button>
       ) : (
-        <button onClick={stopRadar} className="w-full bg-red-600/30 border border-red-500 hover:bg-red-600 text-white text-xs font-black uppercase py-3 rounded-lg transition-all flex items-center justify-center gap-2 animate-pulse">
-          🛑 Desativar Radar
+        <button
+          onClick={stopScan}
+          className="w-full py-4 bg-red-900/80 hover:bg-red-800 text-white rounded-lg font-bold tracking-widest flex items-center justify-center space-x-2 transition-all border border-red-700/50"
+        >
+          <Square className="w-5 h-5 fill-current" />
+          <span>DESLIGAR RADAR</span>
         </button>
       )}
     </div>
