@@ -36,7 +36,6 @@ app.post("/api/ocr", async (req, res) => {
       { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
     ]);
     
-    // O FILTRO DE LIMPEZA ABSOLUTA
     let rawText = result.response.text();
     rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
     
@@ -131,19 +130,49 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// ==========================================
+// ROTA DE SYNC INTELIGENTE (FILTRO DE DEDUPLICAÇÃO HAWK-EYE)
+// ==========================================
 app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
   try {
     const { id } = req.params; const { numbers } = req.body;
     const session = await prisma.session.findUnique({ where: { id } });
     if (!session) throw new Error("Sessão não existe.");
-    for (const num of numbers) {
+
+    const dbSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 10 });
+    const dbNumbers = dbSpins.map(s => s.number);
+
+    // Identifica apenas os números que são genuinamente novos para não duplicar o histórico
+    let newNumbers: number[] = [];
+    if (dbNumbers.length === 0) {
+      newNumbers = numbers; // Se estiver vazio, adiciona tudo
+    } else {
+      let matchIndex = -1;
+      for (let i = 0; i < numbers.length; i++) {
+         let isMatch = true;
+         for (let j = 0; j < Math.min(3, dbNumbers.length); j++) {
+            if (numbers[i + j] !== dbNumbers[j]) { isMatch = false; break; }
+         }
+         if (isMatch) { matchIndex = i; break; }
+      }
+      if (matchIndex === -1) {
+         newNumbers = [numbers[0]]; // Se não achou sobreposição exata, adiciona apenas o último sorteado
+      } else {
+         newNumbers = numbers.slice(0, matchIndex); // Pega apenas a diferença nova
+      }
+    }
+
+    const toInsert = [...newNumbers].reverse();
+
+    for (const num of toInsert) {
       await StrategyOrchestrator.resolvePendingSignals(num, id);
       await prisma.spin.create({ data: { session_id: id, number: num } });
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
     }
-    res.json({ message: "Success" });
+    
+    res.json({ message: "Success", added: toInsert.length });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
