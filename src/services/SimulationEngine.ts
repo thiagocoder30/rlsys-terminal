@@ -1,4 +1,3 @@
-// src/services/SimulationEngine.ts
 import { StrategyOrchestrator } from "./StrategyOrchestrator";
 import { TriplicationMatrix } from "./TriplicationMatrix";
 
@@ -45,8 +44,7 @@ export class SimulationEngine {
           totalLosses++;
           
           if (activeSignal.step === 0) {
-            // Para apostas 1:1, manteremos um controle de Gale curto (Max 1) para proteção
-            const absMin = minChip * (activeSignal.payout === 1 ? 5 : 1); // Peso base ajustado
+            const absMin = minChip * (activeSignal.payout === 1 ? 5 : 1); 
             let exactBet = (activeSignal.amount + absMin) / activeSignal.payout;
             let steps = Math.ceil(exactBet / absMin); if (steps < 1) steps = 1;
             activeSignal = { ...activeSignal, amount: steps * absMin, step: 1 };
@@ -57,7 +55,9 @@ export class SimulationEngine {
         if (currentBankroll > peakBankroll) peakBankroll = currentBankroll;
         const currentDrawdown = peakBankroll - currentBankroll;
         if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
-        if (currentBankroll <= initialBankroll * 0.85) break; 
+        
+        // CORREÇÃO CRÍTICA: Removido o 'break' de Stop Loss Global durante o Backtest.
+        // O simulador precisa processar todos os 500 números para achar a taxa de acerto real das matrizes.
       }
 
       simulatedHistory.unshift(currentNumber);
@@ -69,13 +69,9 @@ export class SimulationEngine {
         for (const strat of activeStrategies) {
           if (strat.name === "Dynamic: Drop Zone") continue;
 
-          // ==========================================
-          // INJEÇÃO DA MATRIZ DE TRIPLICAÇÕES
-          // ==========================================
           if (strat.name.startsWith("Triplications:")) {
              const targets = TriplicationMatrix.getTargets(simulatedHistory, strat.name);
              if (targets) {
-                 // Damos um score competitivo forte para testá-la ativamente
                  const score = -1.2 * (strat.bayes_weight || 1.0);
                  if (score < bestScore) { 
                      bestScore = score; bestCandidate = strat.name; triplicationTarget = targets; 
@@ -84,7 +80,6 @@ export class SimulationEngine {
              continue;
           }
 
-          // Estratégias Clássicas Baseadas em Z-Score
           const config = StrategyOrchestrator.getConfig(strat.name);
           const zScore = StrategyOrchestrator.calculateSectorZScore(simulatedHistory, config);
           const markovProb = StrategyOrchestrator.calculateMarkovProbability(simulatedHistory, config);
@@ -98,22 +93,10 @@ export class SimulationEngine {
 
         if (bestCandidate) {
           if (bestCandidate.startsWith("Triplications:") && triplicationTarget) {
-              activeSignal = { 
-                  strategyName: bestCandidate, 
-                  amount: minChip * 5, // Aposta base para 1:1 (ajustável)
-                  step: 0, 
-                  targetWinCheck: (n: number) => triplicationTarget!.includes(n), 
-                  payout: 1 
-              };
+              activeSignal = { strategyName: bestCandidate, amount: minChip * 5, step: 0, targetWinCheck: (n: number) => triplicationTarget!.includes(n), payout: 1 };
           } else {
               const config = StrategyOrchestrator.getConfig(bestCandidate);
-              activeSignal = { 
-                  strategyName: bestCandidate, 
-                  amount: minChip * config.minChipsRequired, 
-                  step: 0, 
-                  targetWinCheck: config.checkWin, 
-                  payout: config.payoutRatio 
-              };
+              activeSignal = { strategyName: bestCandidate, amount: minChip * config.minChipsRequired, step: 0, targetWinCheck: config.checkWin, payout: config.payoutRatio };
           }
           stratStats[bestCandidate].signals++;
         }
@@ -122,7 +105,6 @@ export class SimulationEngine {
 
     const finalEntropy = StrategyOrchestrator.calculateShannonEntropy(simulatedHistory.slice(0, 37));
 
-    // A GUILHOTINA MATEMÁTICA (Mínimo de 70% de Acerto)
     const rawReport = Object.entries(stratStats)
       .filter(([_, data]) => data.signals > 0)
       .map(([name, data]) => {
@@ -147,12 +129,22 @@ export class SimulationEngine {
       name: strat.name, signalsSent: strat.signalsSent, wins: strat.wins, losses: strat.losses, profit: strat.profit, winRate: strat.winRateStr
     }));
 
+    // ==========================================
+    // VEREDITO BLINDADO E CORRIGIDO
+    // O veredito agora respeita APENAS a saúde do Esquadrão de Elite (safeNetProfit)
+    // ==========================================
     let verdict: "GREEN_LIGHT" | "RED_LIGHT" | "WARNING" = "RED_LIGHT";
-    if (finalEntropy > 4.6 || currentBankroll <= initialBankroll * 0.85) verdict = "RED_LIGHT";
-    else if (eliteStrategies.length > 0 && safeNetProfit > (initialBankroll * 0.02) && maxDrawdown < (initialBankroll * 0.10)) verdict = "GREEN_LIGHT";
-    else if (eliteStrategies.length > 0 && safeNetProfit > 0) verdict = "WARNING";
+    
+    if (finalEntropy > 4.6) {
+      verdict = "RED_LIGHT"; // Caos absoluto detectado na física da roleta
+    } else if (eliteStrategies.length > 0 && safeNetProfit >= (initialBankroll * 0.02)) {
+      verdict = "GREEN_LIGHT"; // Elite filtrou o lixo e garantiu lucro mínimo de 2%
+    } else if (eliteStrategies.length > 0 && safeNetProfit > 0) {
+      verdict = "WARNING"; // Elite teve lucro, mas abaixo de 2% (Risco Amarelo)
+    }
 
     const entropyStatus = finalEntropy > 4.6 ? "CAOS" : (finalEntropy > 4.0 ? "VOLÁTIL" : "ESTÁVEL");
+    
     return { 
       initialBankroll, finalBankroll: initialBankroll + safeNetProfit, netProfit: safeNetProfit, winRate: safeWinRateStr, 
       totalSignals: totalEliteConcluded, maxDrawdown, entropyStatus, strategiesReport: finalStrategiesReport, 
