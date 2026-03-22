@@ -1,4 +1,6 @@
+// src/services/SimulationEngine.ts
 import { StrategyOrchestrator } from "./StrategyOrchestrator";
+import { TriplicationMatrix } from "./TriplicationMatrix";
 
 export interface SimulationResult {
   initialBankroll: number;
@@ -43,8 +45,8 @@ export class SimulationEngine {
           totalLosses++;
           
           if (activeSignal.step === 0) {
-            const config = StrategyOrchestrator.getConfig(activeSignal.strategyName);
-            const absMin = minChip * config.minChipsRequired;
+            // Para apostas 1:1, manteremos um controle de Gale curto (Max 1) para proteção
+            const absMin = minChip * (activeSignal.payout === 1 ? 5 : 1); // Peso base ajustado
             let exactBet = (activeSignal.amount + absMin) / activeSignal.payout;
             let steps = Math.ceil(exactBet / absMin); if (steps < 1) steps = 1;
             activeSignal = { ...activeSignal, amount: steps * absMin, step: 1 };
@@ -60,33 +62,59 @@ export class SimulationEngine {
 
       simulatedHistory.unshift(currentNumber);
 
-      if (!activeSignal && simulatedHistory.length >= 10 && consecutiveLosses < 2) {
-        const entropy = StrategyOrchestrator.calculateShannonEntropy(simulatedHistory);
-        if (entropy > 4.60) continue; 
-
-        const dropZoneTarget = StrategyOrchestrator.calculatePhysicalDropZone(simulatedHistory);
-        if (dropZoneTarget !== null) {
-           const config = StrategyOrchestrator.getConfig("Dynamic: Drop Zone");
-           activeSignal = { strategyName: "Dynamic: Drop Zone", amount: minChip * 5, step: 0, targetWinCheck: config.checkWin, payout: config.payoutRatio };
-           stratStats["Dynamic: Drop Zone"].signals++;
-           continue;
-        }
-
+      if (!activeSignal && simulatedHistory.length >= 2 && consecutiveLosses < 2) {
         let bestCandidate = null; let bestScore = Infinity; 
+        let triplicationTarget: number[] | null = null;
+
         for (const strat of activeStrategies) {
           if (strat.name === "Dynamic: Drop Zone") continue;
+
+          // ==========================================
+          // INJEÇÃO DA MATRIZ DE TRIPLICAÇÕES
+          // ==========================================
+          if (strat.name.startsWith("Triplications:")) {
+             const targets = TriplicationMatrix.getTargets(simulatedHistory, strat.name);
+             if (targets) {
+                 // Damos um score competitivo forte para testá-la ativamente
+                 const score = -1.2 * (strat.bayes_weight || 1.0);
+                 if (score < bestScore) { 
+                     bestScore = score; bestCandidate = strat.name; triplicationTarget = targets; 
+                 }
+             }
+             continue;
+          }
+
+          // Estratégias Clássicas Baseadas em Z-Score
           const config = StrategyOrchestrator.getConfig(strat.name);
           const zScore = StrategyOrchestrator.calculateSectorZScore(simulatedHistory, config);
           const markovProb = StrategyOrchestrator.calculateMarkovProbability(simulatedHistory, config);
           if (zScore <= -0.85 && markovProb >= ((config.coverage / 37) * 0.75)) {
              const score = (zScore - markovProb) * (strat.bayes_weight || 1.0);
-             if (score < bestScore) { bestScore = score; bestCandidate = strat.name; }
+             if (score < bestScore) { 
+                 bestScore = score; bestCandidate = strat.name; triplicationTarget = null; 
+             }
           }
         }
 
         if (bestCandidate) {
-          const config = StrategyOrchestrator.getConfig(bestCandidate);
-          activeSignal = { strategyName: bestCandidate, amount: minChip * config.minChipsRequired, step: 0, targetWinCheck: config.checkWin, payout: config.payoutRatio };
+          if (bestCandidate.startsWith("Triplications:") && triplicationTarget) {
+              activeSignal = { 
+                  strategyName: bestCandidate, 
+                  amount: minChip * 5, // Aposta base para 1:1 (ajustável)
+                  step: 0, 
+                  targetWinCheck: (n: number) => triplicationTarget!.includes(n), 
+                  payout: 1 
+              };
+          } else {
+              const config = StrategyOrchestrator.getConfig(bestCandidate);
+              activeSignal = { 
+                  strategyName: bestCandidate, 
+                  amount: minChip * config.minChipsRequired, 
+                  step: 0, 
+                  targetWinCheck: config.checkWin, 
+                  payout: config.payoutRatio 
+              };
+          }
           stratStats[bestCandidate].signals++;
         }
       }
@@ -94,37 +122,20 @@ export class SimulationEngine {
 
     const finalEntropy = StrategyOrchestrator.calculateShannonEntropy(simulatedHistory.slice(0, 37));
 
-    // ==========================================
-    // INÍCIO DO FILTRO DE DOUTRINA DE RISCO MÁXIMO
-    // ==========================================
-    
-    // 1. Extrai o relatório bruto de todas as matrizes que operaram
+    // A GUILHOTINA MATEMÁTICA (Mínimo de 70% de Acerto)
     const rawReport = Object.entries(stratStats)
       .filter(([_, data]) => data.signals > 0)
       .map(([name, data]) => {
         const concluded = data.wins + data.losses;
         const winRateNum = concluded > 0 ? (data.wins / concluded) * 100 : 0;
-        return {
-          name,
-          signalsSent: data.signals,
-          wins: data.wins,
-          losses: data.losses,
-          profit: data.profit,
-          winRateNum: winRateNum,
-          winRateStr: winRateNum.toFixed(1)
-        };
+        return { name, signalsSent: data.signals, wins: data.wins, losses: data.losses, profit: data.profit, winRateNum: winRateNum, winRateStr: winRateNum.toFixed(1) };
       });
 
-    // 2. A Guilhotina: Sobrevivem apenas estratégias com >= 70% de acerto E lucro positivo
     const eliteStrategies = rawReport
       .filter(strat => strat.winRateNum >= 70.0 && strat.profit > 0)
       .sort((a, b) => b.profit - a.profit);
 
-    // 3. Recalcula o P&L Global e WinRate APENAS usando o esquadrão de elite
-    let safeNetProfit = 0;
-    let totalEliteConcluded = 0;
-    let totalEliteWins = 0;
-
+    let safeNetProfit = 0; let totalEliteConcluded = 0; let totalEliteWins = 0;
     eliteStrategies.forEach(strat => {
       safeNetProfit += strat.profit;
       totalEliteConcluded += (strat.wins + strat.losses);
@@ -132,44 +143,21 @@ export class SimulationEngine {
     });
 
     const safeWinRateStr = totalEliteConcluded > 0 ? ((totalEliteWins / totalEliteConcluded) * 100).toFixed(1) : "0.0";
-
-    // 4. Formata o relatório para a interface visual
     const finalStrategiesReport = eliteStrategies.map(strat => ({
-      name: strat.name,
-      signalsSent: strat.signalsSent,
-      wins: strat.wins,
-      losses: strat.losses,
-      profit: strat.profit,
-      winRate: strat.winRateStr
+      name: strat.name, signalsSent: strat.signalsSent, wins: strat.wins, losses: strat.losses, profit: strat.profit, winRate: strat.winRateStr
     }));
 
-    // 5. O Veredito de Alta Rigidez
     let verdict: "GREEN_LIGHT" | "RED_LIGHT" | "WARNING" = "RED_LIGHT";
-
-    if (finalEntropy > 4.6 || currentBankroll <= initialBankroll * 0.85) {
-      verdict = "RED_LIGHT"; // Caos na mesa ou Quebra de Banca = Abortar sumariamente
-    } else if (eliteStrategies.length > 0 && safeNetProfit > (initialBankroll * 0.02) && maxDrawdown < (initialBankroll * 0.10)) {
-      verdict = "GREEN_LIGHT"; // Tem que garantir pelo menos 2% de lucro com as elites e Drawdown < 10%
-    } else if (eliteStrategies.length > 0 && safeNetProfit > 0) {
-      verdict = "WARNING"; // Lucro existe, mas a margem é apertada. Alerta amarelo.
-    }
+    if (finalEntropy > 4.6 || currentBankroll <= initialBankroll * 0.85) verdict = "RED_LIGHT";
+    else if (eliteStrategies.length > 0 && safeNetProfit > (initialBankroll * 0.02) && maxDrawdown < (initialBankroll * 0.10)) verdict = "GREEN_LIGHT";
+    else if (eliteStrategies.length > 0 && safeNetProfit > 0) verdict = "WARNING";
 
     const entropyStatus = finalEntropy > 4.6 ? "CAOS" : (finalEntropy > 4.0 ? "VOLÁTIL" : "ESTÁVEL");
-    const bestStrategy = finalStrategiesReport.length > 0 ? finalStrategiesReport[0].name : "N/A";
-    const worstStrategy = finalStrategiesReport.length > 0 ? finalStrategiesReport[finalStrategiesReport.length - 1].name : "N/A";
-
     return { 
-      initialBankroll, 
-      finalBankroll: initialBankroll + safeNetProfit, 
-      netProfit: safeNetProfit, 
-      winRate: safeWinRateStr, 
-      totalSignals: totalEliteConcluded, 
-      maxDrawdown, 
-      entropyStatus, 
-      strategiesReport: finalStrategiesReport, 
-      bestStrategy, 
-      worstStrategy, 
-      verdict 
+      initialBankroll, finalBankroll: initialBankroll + safeNetProfit, netProfit: safeNetProfit, winRate: safeWinRateStr, 
+      totalSignals: totalEliteConcluded, maxDrawdown, entropyStatus, strategiesReport: finalStrategiesReport, 
+      bestStrategy: finalStrategiesReport.length > 0 ? finalStrategiesReport[0].name : "N/A", 
+      worstStrategy: finalStrategiesReport.length > 0 ? finalStrategiesReport[finalStrategiesReport.length - 1].name : "N/A", verdict 
     };
   }
 }
