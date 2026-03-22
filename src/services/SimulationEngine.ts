@@ -92,20 +92,84 @@ export class SimulationEngine {
       }
     }
 
-    const netProfit = currentBankroll - initialBankroll;
-    const totalConcluded = totalWins + totalLosses;
-    const winRate = totalConcluded > 0 ? ((totalWins / totalConcluded) * 100).toFixed(1) : "0.0";
     const finalEntropy = StrategyOrchestrator.calculateShannonEntropy(simulatedHistory.slice(0, 37));
 
-    const report = Object.entries(stratStats)
+    // ==========================================
+    // INÍCIO DO FILTRO DE DOUTRINA DE RISCO MÁXIMO
+    // ==========================================
+    
+    // 1. Extrai o relatório bruto de todas as matrizes que operaram
+    const rawReport = Object.entries(stratStats)
       .filter(([_, data]) => data.signals > 0)
-      .map(([name, data]) => ({ name, signalsSent: data.signals, wins: data.wins, losses: data.losses, profit: data.profit, winRate: (data.wins + data.losses) > 0 ? ((data.wins / (data.wins + data.losses)) * 100).toFixed(1) : "0.0" }))
+      .map(([name, data]) => {
+        const concluded = data.wins + data.losses;
+        const winRateNum = concluded > 0 ? (data.wins / concluded) * 100 : 0;
+        return {
+          name,
+          signalsSent: data.signals,
+          wins: data.wins,
+          losses: data.losses,
+          profit: data.profit,
+          winRateNum: winRateNum,
+          winRateStr: winRateNum.toFixed(1)
+        };
+      });
+
+    // 2. A Guilhotina: Sobrevivem apenas estratégias com >= 70% de acerto E lucro positivo
+    const eliteStrategies = rawReport
+      .filter(strat => strat.winRateNum >= 70.0 && strat.profit > 0)
       .sort((a, b) => b.profit - a.profit);
 
-    let verdict: "GREEN_LIGHT" | "RED_LIGHT" | "WARNING" = "WARNING";
-    if (netProfit > 0 && finalEntropy <= 4.5 && maxDrawdown < (initialBankroll * 0.10)) verdict = "GREEN_LIGHT";
-    else if (currentBankroll <= initialBankroll * 0.85 || finalEntropy > 4.6) verdict = "RED_LIGHT";
+    // 3. Recalcula o P&L Global e WinRate APENAS usando o esquadrão de elite
+    let safeNetProfit = 0;
+    let totalEliteConcluded = 0;
+    let totalEliteWins = 0;
 
-    return { initialBankroll, finalBankroll: currentBankroll, netProfit, winRate, totalSignals: totalConcluded, maxDrawdown, entropyStatus: finalEntropy > 4.6 ? "CAOS" : (finalEntropy > 4.0 ? "VOLÁTIL" : "ESTÁVEL"), strategiesReport: report, bestStrategy: report.length > 0 ? report[0].name : "N/A", worstStrategy: report.length > 0 ? report[report.length - 1].name : "N/A", verdict };
+    eliteStrategies.forEach(strat => {
+      safeNetProfit += strat.profit;
+      totalEliteConcluded += (strat.wins + strat.losses);
+      totalEliteWins += strat.wins;
+    });
+
+    const safeWinRateStr = totalEliteConcluded > 0 ? ((totalEliteWins / totalEliteConcluded) * 100).toFixed(1) : "0.0";
+
+    // 4. Formata o relatório para a interface visual
+    const finalStrategiesReport = eliteStrategies.map(strat => ({
+      name: strat.name,
+      signalsSent: strat.signalsSent,
+      wins: strat.wins,
+      losses: strat.losses,
+      profit: strat.profit,
+      winRate: strat.winRateStr
+    }));
+
+    // 5. O Veredito de Alta Rigidez
+    let verdict: "GREEN_LIGHT" | "RED_LIGHT" | "WARNING" = "RED_LIGHT";
+
+    if (finalEntropy > 4.6 || currentBankroll <= initialBankroll * 0.85) {
+      verdict = "RED_LIGHT"; // Caos na mesa ou Quebra de Banca = Abortar sumariamente
+    } else if (eliteStrategies.length > 0 && safeNetProfit > (initialBankroll * 0.02) && maxDrawdown < (initialBankroll * 0.10)) {
+      verdict = "GREEN_LIGHT"; // Tem que garantir pelo menos 2% de lucro com as elites e Drawdown < 10%
+    } else if (eliteStrategies.length > 0 && safeNetProfit > 0) {
+      verdict = "WARNING"; // Lucro existe, mas a margem é apertada. Alerta amarelo.
+    }
+
+    const entropyStatus = finalEntropy > 4.6 ? "CAOS" : (finalEntropy > 4.0 ? "VOLÁTIL" : "ESTÁVEL");
+    const bestStrategy = finalStrategiesReport.length > 0 ? finalStrategiesReport[0].name : "N/A";
+    const worstStrategy = finalStrategiesReport.length > 0 ? finalStrategiesReport[finalStrategiesReport.length - 1].name : "N/A";
+
+    return { 
+      initialBankroll, 
+      finalBankroll: initialBankroll + safeNetProfit, 
+      netProfit: safeNetProfit, 
+      winRate: safeWinRateStr, 
+      totalSignals: totalEliteConcluded, 
+      maxDrawdown, 
+      entropyStatus, 
+      strategiesReport: finalStrategiesReport, 
+      bestStrategy, 
+      worstStrategy, 
+      verdict 
+    };
   }
 }
