@@ -65,7 +65,6 @@ app.post("/api/simulate", async (req, res) => {
     const { numbers, initial_bankroll, min_chip } = req.body;
     if (!numbers || numbers.length === 0) throw new Error("Nenhum giro fornecido.");
     
-    // Filtro de Segurança para o Simulador
     const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
     
     const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
@@ -75,26 +74,34 @@ app.post("/api/simulate", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE WARM-START (COM BLINDAGEM DE DADOS CORRIGIDA)
+// ROTA DE WARM-START (COM LOGS E BYPASS DO CREATE-MANY)
 // ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
     const { initial_bankroll, min_chip, numbers } = req.body;
+    console.log(`\n[DEPLOY] Solicitando Warm-Start. Números brutos recebidos: ${numbers?.length || 0}`);
+
     const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
     
-    // FILTRO DE SANITIZAÇÃO ABSOLUTA: Remove nulls, textos e converte para Inteiro limpo
     const safeNumbers = numbers
       .map((n: any) => parseInt(n, 10))
       .filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
 
-    const spinData = safeNumbers.map((num: number) => ({ session_id: session.id, number: num }));
-    
-    if (spinData.length > 0) {
-      await prisma.spin.createMany({ data: spinData });
+    console.log(`[DEPLOY] Números validados e limpos: ${safeNumbers.length}`);
+
+    // Injeção cirúrgica, número por número, evitando o gargalo do createMany
+    for (const num of safeNumbers) {
+      await prisma.spin.create({
+        data: { session_id: session.id, number: num }
+      });
     }
     
+    console.log(`[DEPLOY] Sucesso. Banco de dados carregado com ${safeNumbers.length} giros.`);
     res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error: any) { 
+    console.error(`[DEPLOY ERRO CRÍTICO]:`, error.message);
+    res.status(500).json({ error: error.message }); 
+  }
 });
 
 app.post("/api/sessions", async (req, res) => {
@@ -147,9 +154,6 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// ==========================================
-// ROTA DE SYNC INTELIGENTE (COM FILTRO DE SANITIZAÇÃO)
-// ==========================================
 app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
   try {
     const { id } = req.params; const { numbers } = req.body;
@@ -159,7 +163,6 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
     const dbSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 10 });
     const dbNumbers = dbSpins.map(s => s.number);
 
-    // Sanitiza os números antes de verificar
     const safeNumbers = numbers
       .map((n: any) => parseInt(n, 10))
       .filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
