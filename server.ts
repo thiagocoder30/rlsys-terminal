@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
-// FUNÇÕES TÁTICAS: IDENTIFICADORES DE ATRIBUTOS
+// FUNÇÕES TÁTICAS: O PINTOR ALGORÍTMICO COMPLETO
 // ==========================================
 function getNumberColor(num: number): string {
   if (num === 0) return "GREEN";
@@ -26,6 +26,20 @@ function getNumberColor(num: number): string {
 function getNumberParity(num: number): string {
   if (num === 0) return "ZERO";
   return num % 2 === 0 ? "EVEN" : "ODD";
+}
+
+function getNumberDozen(num: number): string {
+  if (num === 0) return "ZERO";
+  if (num <= 12) return "1";
+  if (num <= 24) return "2";
+  return "3";
+}
+
+function getNumberColumn(num: number): string {
+  if (num === 0) return "ZERO";
+  if (num % 3 === 1) return "1";
+  if (num % 3 === 2) return "2";
+  return "3";
 }
 
 // ==========================================
@@ -88,7 +102,7 @@ app.post("/api/simulate", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE WARM-START (COM INJEÇÃO COMPLETA DE ATRIBUTOS)
+// ROTA DE WARM-START (COM INJEÇÃO TOTAL DE ATRIBUTOS)
 // ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
@@ -103,14 +117,16 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     console.log(`[DEPLOY] Números validados e limpos: ${safeNumbers.length}`);
 
-    // Injeção cirúrgica com parâmetros 'color' e 'parity' obrigatórios
+    // Injeção cirúrgica com TODOS os parâmetros da mesa
     for (const num of safeNumbers) {
       await prisma.spin.create({
         data: { 
           session_id: session.id, 
           number: num,
           color: getNumberColor(num),
-          parity: getNumberParity(num)
+          parity: getNumberParity(num),
+          dozen: getNumberDozen(num),
+          column: getNumberColumn(num)
         }
       });
     }
@@ -163,13 +179,14 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
     const { number } = req.body;
     await StrategyOrchestrator.resolvePendingSignals(number, id);
     
-    // Injeção de atributos na entrada manual / giros avulsos
     const spin = await prisma.spin.create({ 
       data: { 
         session_id: id, 
         number,
         color: getNumberColor(number),
-        parity: getNumberParity(number)
+        parity: getNumberParity(number),
+        dozen: getNumberDozen(number),
+        column: getNumberColumn(number)
       } 
     });
     
@@ -220,13 +237,14 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
     for (const num of toInsert) {
       await StrategyOrchestrator.resolvePendingSignals(num, id);
       
-      // Injeção de atributos no sincronismo contínuo do Hawk-Eye
       await prisma.spin.create({ 
         data: { 
           session_id: id, 
           number: num,
           color: getNumberColor(num),
-          parity: getNumberParity(num)
+          parity: getNumberParity(num),
+          dozen: getNumberDozen(num),
+          column: getNumberColumn(num)
         } 
       });
       
