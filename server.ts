@@ -15,6 +15,15 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
+// FUNÇÃO TÁTICA: IDENTIFICADOR DE CORES
+// ==========================================
+function getNumberColor(num: number): string {
+  if (num === 0) return "GREEN";
+  const reds = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+  return reds.includes(num) ? "RED" : "BLACK";
+}
+
+// ==========================================
 // ROTA BLINDADA DE OCR
 // ==========================================
 app.post("/api/ocr", async (req, res) => {
@@ -74,7 +83,7 @@ app.post("/api/simulate", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE WARM-START (COM LOGS E BYPASS DO CREATE-MANY)
+// ROTA DE WARM-START (COM INJEÇÃO DE CORES)
 // ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
@@ -89,10 +98,14 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     console.log(`[DEPLOY] Números validados e limpos: ${safeNumbers.length}`);
 
-    // Injeção cirúrgica, número por número, evitando o gargalo do createMany
+    // Injeção cirúrgica com o parâmetro 'color' obrigatório
     for (const num of safeNumbers) {
       await prisma.spin.create({
-        data: { session_id: session.id, number: num }
+        data: { 
+          session_id: session.id, 
+          number: num,
+          color: getNumberColor(num) 
+        }
       });
     }
     
@@ -143,7 +156,16 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
     const { id } = req.params;
     const { number } = req.body;
     await StrategyOrchestrator.resolvePendingSignals(number, id);
-    const spin = await prisma.spin.create({ data: { session_id: id, number } });
+    
+    // Injeção de cor também na entrada manual / giros avulsos
+    const spin = await prisma.spin.create({ 
+      data: { 
+        session_id: id, 
+        number,
+        color: getNumberColor(number)
+      } 
+    });
+    
     const session = await prisma.session.findUnique({ where: { id } });
     if (session) {
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
@@ -190,7 +212,16 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
 
     for (const num of toInsert) {
       await StrategyOrchestrator.resolvePendingSignals(num, id);
-      await prisma.spin.create({ data: { session_id: id, number: num } });
+      
+      // Injeção de cor também no sincronismo contínuo do Hawk-Eye
+      await prisma.spin.create({ 
+        data: { 
+          session_id: id, 
+          number: num,
+          color: getNumberColor(num)
+        } 
+      });
+      
       const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
       const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
       await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
