@@ -15,12 +15,17 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
-// FUNÇÃO TÁTICA: IDENTIFICADOR DE CORES
+// FUNÇÕES TÁTICAS: IDENTIFICADORES DE ATRIBUTOS
 // ==========================================
 function getNumberColor(num: number): string {
   if (num === 0) return "GREEN";
   const reds = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
   return reds.includes(num) ? "RED" : "BLACK";
+}
+
+function getNumberParity(num: number): string {
+  if (num === 0) return "ZERO";
+  return num % 2 === 0 ? "EVEN" : "ODD";
 }
 
 // ==========================================
@@ -83,7 +88,7 @@ app.post("/api/simulate", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE WARM-START (COM INJEÇÃO DE CORES)
+// ROTA DE WARM-START (COM INJEÇÃO COMPLETA DE ATRIBUTOS)
 // ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
@@ -98,13 +103,14 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     console.log(`[DEPLOY] Números validados e limpos: ${safeNumbers.length}`);
 
-    // Injeção cirúrgica com o parâmetro 'color' obrigatório
+    // Injeção cirúrgica com parâmetros 'color' e 'parity' obrigatórios
     for (const num of safeNumbers) {
       await prisma.spin.create({
         data: { 
           session_id: session.id, 
           number: num,
-          color: getNumberColor(num) 
+          color: getNumberColor(num),
+          parity: getNumberParity(num)
         }
       });
     }
@@ -157,12 +163,13 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
     const { number } = req.body;
     await StrategyOrchestrator.resolvePendingSignals(number, id);
     
-    // Injeção de cor também na entrada manual / giros avulsos
+    // Injeção de atributos na entrada manual / giros avulsos
     const spin = await prisma.spin.create({ 
       data: { 
         session_id: id, 
         number,
-        color: getNumberColor(number)
+        color: getNumberColor(number),
+        parity: getNumberParity(number)
       } 
     });
     
@@ -213,12 +220,13 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
     for (const num of toInsert) {
       await StrategyOrchestrator.resolvePendingSignals(num, id);
       
-      // Injeção de cor também no sincronismo contínuo do Hawk-Eye
+      // Injeção de atributos no sincronismo contínuo do Hawk-Eye
       await prisma.spin.create({ 
         data: { 
           session_id: id, 
           number: num,
-          color: getNumberColor(num)
+          color: getNumberColor(num),
+          parity: getNumberParity(num)
         } 
       });
       
