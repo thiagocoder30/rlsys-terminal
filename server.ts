@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
-// FUNÇÕES TÁTICAS: O PINTOR ALGORÍTMICO COMPLETO
+// FUNÇÕES TÁTICAS: O PINTOR ALGORÍTMICO COMPLETO (FINAL)
 // ==========================================
 function getNumberColor(num: number): string {
   if (num === 0) return "GREEN";
@@ -40,6 +40,11 @@ function getNumberColumn(num: number): string {
   if (num % 3 === 1) return "1";
   if (num % 3 === 2) return "2";
   return "3";
+}
+
+function getNumberHalf(num: number): string {
+  if (num === 0) return "ZERO";
+  return num <= 18 ? "1" : "2"; // 1 para (1-18) e 2 para (19-36)
 }
 
 // ==========================================
@@ -102,7 +107,7 @@ app.post("/api/simulate", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE WARM-START (COM INJEÇÃO TOTAL DE ATRIBUTOS)
+// ROTA DE WARM-START (COM A ANATOMIA COMPLETA)
 // ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
@@ -117,7 +122,7 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     console.log(`[DEPLOY] Números validados e limpos: ${safeNumbers.length}`);
 
-    // Injeção cirúrgica com TODOS os parâmetros da mesa
+    // Injeção cirúrgica com TODOS os parâmetros da mesa (Cor, Paridade, Dúzia, Coluna, Metade)
     for (const num of safeNumbers) {
       await prisma.spin.create({
         data: { 
@@ -126,7 +131,8 @@ app.post("/api/sessions/warm-start", async (req, res) => {
           color: getNumberColor(num),
           parity: getNumberParity(num),
           dozen: getNumberDozen(num),
-          column: getNumberColumn(num)
+          column: getNumberColumn(num),
+          half: getNumberHalf(num)
         }
       });
     }
@@ -186,7 +192,8 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
         color: getNumberColor(number),
         parity: getNumberParity(number),
         dozen: getNumberDozen(number),
-        column: getNumberColumn(number)
+        column: getNumberColumn(number),
+        half: getNumberHalf(number)
       } 
     });
     
@@ -244,7 +251,8 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
           color: getNumberColor(num),
           parity: getNumberParity(num),
           dozen: getNumberDozen(num),
-          column: getNumberColumn(num)
+          column: getNumberColumn(num),
+          half: getNumberHalf(num)
         } 
       });
       
