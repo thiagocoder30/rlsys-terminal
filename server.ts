@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" })); 
 
 // ==========================================
-// ROTA BLINDADA DE OCR (COM FILTRO DE LIMPEZA DE MARKDOWN)
+// ROTA BLINDADA DE OCR
 // ==========================================
 app.post("/api/ocr", async (req, res) => {
   try {
@@ -23,7 +23,7 @@ app.post("/api/ocr", async (req, res) => {
     if (!imageBase64) throw new Error("Imagem não fornecida ao servidor.");
 
     const apiKey = process.env.VITE_GEMINI_API_KEY; 
-    if (!apiKey) throw new Error("Chave da API do Gemini ausente no servidor (Verifique o arquivo .env).");
+    if (!apiKey) throw new Error("Chave da API ausente.");
 
     const genAI = new GoogleGenerativeAI(apiKey); 
     const model = genAI.getGenerativeModel({ 
@@ -64,18 +64,35 @@ app.post("/api/simulate", async (req, res) => {
   try {
     const { numbers, initial_bankroll, min_chip } = req.body;
     if (!numbers || numbers.length === 0) throw new Error("Nenhum giro fornecido.");
+    
+    // Filtro de Segurança para o Simulador
+    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
+    
     const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-    const report = await SimulationEngine.runBacktest(numbers, initial_bankroll, min_chip, activeStrategies);
+    const report = await SimulationEngine.runBacktest(safeNumbers, initial_bankroll, min_chip, activeStrategies);
     res.json(report);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// ==========================================
+// ROTA DE WARM-START (COM BLINDAGEM DE DADOS CORRIGIDA)
+// ==========================================
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
     const { initial_bankroll, min_chip, numbers } = req.body;
     const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
-    const spinData = numbers.map((num: number) => ({ session_id: session.id, number: num }));
-    await prisma.spin.createMany({ data: spinData });
+    
+    // FILTRO DE SANITIZAÇÃO ABSOLUTA: Remove nulls, textos e converte para Inteiro limpo
+    const safeNumbers = numbers
+      .map((n: any) => parseInt(n, 10))
+      .filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
+
+    const spinData = safeNumbers.map((num: number) => ({ session_id: session.id, number: num }));
+    
+    if (spinData.length > 0) {
+      await prisma.spin.createMany({ data: spinData });
+    }
+    
     res.json(session);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
@@ -131,7 +148,7 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
 });
 
 // ==========================================
-// ROTA DE SYNC INTELIGENTE (FILTRO DE DEDUPLICAÇÃO HAWK-EYE)
+// ROTA DE SYNC INTELIGENTE (COM FILTRO DE SANITIZAÇÃO)
 // ==========================================
 app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
   try {
@@ -142,23 +159,27 @@ app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
     const dbSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 10 });
     const dbNumbers = dbSpins.map(s => s.number);
 
-    // Identifica apenas os números que são genuinamente novos para não duplicar o histórico
+    // Sanitiza os números antes de verificar
+    const safeNumbers = numbers
+      .map((n: any) => parseInt(n, 10))
+      .filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
+
     let newNumbers: number[] = [];
     if (dbNumbers.length === 0) {
-      newNumbers = numbers; // Se estiver vazio, adiciona tudo
+      newNumbers = safeNumbers;
     } else {
       let matchIndex = -1;
-      for (let i = 0; i < numbers.length; i++) {
+      for (let i = 0; i < safeNumbers.length; i++) {
          let isMatch = true;
          for (let j = 0; j < Math.min(3, dbNumbers.length); j++) {
-            if (numbers[i + j] !== dbNumbers[j]) { isMatch = false; break; }
+            if (safeNumbers[i + j] !== dbNumbers[j]) { isMatch = false; break; }
          }
          if (isMatch) { matchIndex = i; break; }
       }
       if (matchIndex === -1) {
-         newNumbers = [numbers[0]]; // Se não achou sobreposição exata, adiciona apenas o último sorteado
+         newNumbers = safeNumbers.length > 0 ? [safeNumbers[0]] : [];
       } else {
-         newNumbers = numbers.slice(0, matchIndex); // Pega apenas a diferença nova
+         newNumbers = safeNumbers.slice(0, matchIndex);
       }
     }
 
