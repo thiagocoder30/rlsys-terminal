@@ -3,6 +3,7 @@ import { HeaderStatus } from "./components/HeaderStatus";
 import { SpinTimeline } from "./components/SpinTimeline";
 import { ManualEntryInput } from "./components/ManualEntryInput";
 import { OcrButton } from "./components/OcrButton";
+import { HawkEye } from "./components/HawkEye";
 import { motion, AnimatePresence } from "framer-motion";
 
 const getPayoutRatio = (stratName: string) => {
@@ -209,6 +210,17 @@ export default function App() {
     catch (err: any) {} finally { setLoading(false); }
   };
 
+  const processOCRBase64 = async (base64Image: string): Promise<number[]> => {
+    const response = await fetch("/api/ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: base64Image })
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.error || "Erro no OCR.");
+    return json.numbers;
+  };
+
   const processOCR = async (file: File): Promise<number[]> => {
     const base64Image = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader(); reader.readAsDataURL(file);
@@ -223,16 +235,19 @@ export default function App() {
         }; img.onerror = reject;
       }; reader.onerror = reject;
     });
+    return processOCRBase64(base64Image);
+  };
 
-    const response = await fetch("/api/ocr", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: base64Image })
-    });
-
-    const json = await response.json();
-    if (!response.ok) throw new Error(json.error || "Erro no servidor ao ler OCR.");
-    return json.numbers;
+  const handleHawkEyeLiveCapture = async (base64Image: string) => {
+    if (!sessionId || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
+    setLoading(true);
+    try {
+      const numbers = await processOCRBase64(base64Image);
+      await fetch(`/api/sessions/${sessionId}/ocr/sync`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ numbers }) });
+      fetchData();
+    } catch (err: any) {
+      console.error("Hawk-Eye Scanner Error:", err.message);
+    } finally { setLoading(false); }
   };
 
   const handleOcrSimulatorUpload = async (file: File) => {
@@ -460,8 +475,11 @@ export default function App() {
       <motion.div initial={{ y: 100 }} animate={{ y: 0 }} className="flex-grow bg-gray-950 rounded-t-[32px] border-t border-gray-800 p-4 pb-8 mt-4 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]">
         <div className="w-12 h-1.5 bg-gray-800 rounded-full mx-auto mb-6" />
         <div className="space-y-6">
+          <section>
+            <HawkEye onCapture={handleHawkEyeLiveCapture} isProcessing={loading} />
+          </section>
+          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Carga Inicial (Foto)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
           <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Entrada Manual</span><ManualEntryInput onNumberSubmit={handleNumberClick} isLoading={loading} /></section>
-          <section><span className="block text-[10px] uppercase font-black text-gray-500 mb-3 px-2">Leitura Óptica (OCR)</span><OcrButton onUpload={handleOcrUpload} isLoading={loading} /></section>
         </div>
       </motion.div>
 
