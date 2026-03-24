@@ -51,21 +51,21 @@ function getNumberHalf(num: number): string {
 }
 
 // ==========================================
-// ROTA DO RADAR AUTÔNOMO (BYPASS ADB TERMUX)
+// ROTA DO RADAR AUTÔNOMO (COM AUTO-RECONEXÃO)
 // ==========================================
 app.get("/api/radar/scan", async (req, res) => {
   try {
+    // SISTEMA DE AUTO-HEAL: Força a reconexão na porta fixa antes de cada tiro
+    // Se a conexão piscar, o próprio servidor conserta sem você precisar ir no Termux
+    await execPromise("adb connect localhost:5555").catch(() => {});
+
     console.log("[HAWK-EYE] Disparando captura de tela via ADB...");
     
-    // 1. Tira a foto silenciosa direto do buffer de vídeo (suporta até 50MB para não travar)
     const { stdout } = await execPromise("adb exec-out screencap -p", { encoding: "buffer", maxBuffer: 1024 * 1024 * 50 });
-    
-    // 2. Converte a foto invisível para Base64
     const base64Image = stdout.toString("base64");
     
     console.log("[HAWK-EYE] Captura bem-sucedida. Enviando para IA...");
 
-    // 3. Manda para a Visão Computacional (Gemini)
     const apiKey = process.env.VITE_GEMINI_API_KEY; 
     if (!apiKey) throw new Error("Chave da API ausente.");
 
