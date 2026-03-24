@@ -1,5 +1,6 @@
 import { StrategyOrchestrator } from "./StrategyOrchestrator";
 import { TriplicationMatrix } from "./TriplicationMatrix";
+import { BankrollManager } from "./BankrollManager";
 
 export interface SimulationResult {
   initialBankroll: number;
@@ -47,7 +48,7 @@ export class SimulationEngine {
             const absMin = minChip * (activeSignal.payout === 1 ? 5 : 1); 
             let exactBet = (activeSignal.amount + absMin) / activeSignal.payout;
             let steps = Math.ceil(exactBet / absMin); if (steps < 1) steps = 1;
-            activeSignal = { ...activeSignal, amount: steps * absMin, step: 1 };
+            activeSignal = { ...activeSignal, amount: steps * absMin, step: 1 }; // Martingale de recuperação básica no backtest
           } else {
             consecutiveLosses++; activeSignal = null; 
           }
@@ -89,11 +90,22 @@ export class SimulationEngine {
         }
 
         if (bestCandidate) {
+          // Calcula a Assertividade atual da estratégia em tempo real dentro do loop do passado
+          const concluded = stratStats[bestCandidate].wins + stratStats[bestCandidate].losses;
+          const currentWinRate = concluded >= 3 ? (stratStats[bestCandidate].wins / concluded) * 100 : 0;
+
           if (bestCandidate.startsWith("Triplications:") && triplicationTarget) {
-              activeSignal = { strategyName: bestCandidate, amount: minChip * 5, step: 0, targetWinCheck: (n: number) => triplicationTarget!.includes(n), payout: 1 };
+              // CHAMA O MÓDULO DE GESTÃO DE BANCA
+              const safeAmount = BankrollManager.calculateSafeBet(currentBankroll, minChip, 5, currentWinRate, 1);
+              
+              activeSignal = { strategyName: bestCandidate, amount: safeAmount, step: 0, targetWinCheck: (n: number) => triplicationTarget!.includes(n), payout: 1 };
           } else {
               const config = StrategyOrchestrator.getConfig(bestCandidate);
-              activeSignal = { strategyName: bestCandidate, amount: minChip * config.minChipsRequired, step: 0, targetWinCheck: config.checkWin, payout: config.payoutRatio };
+              
+              // CHAMA O MÓDULO DE GESTÃO DE BANCA
+              const safeAmount = BankrollManager.calculateSafeBet(currentBankroll, minChip, config.minChipsRequired, currentWinRate, config.payoutRatio);
+              
+              activeSignal = { strategyName: bestCandidate, amount: safeAmount, step: 0, targetWinCheck: config.checkWin, payout: config.payoutRatio };
           }
           stratStats[bestCandidate].signals++;
         }
@@ -110,9 +122,6 @@ export class SimulationEngine {
         return { name, signalsSent: data.signals, wins: data.wins, losses: data.losses, profit: data.profit, winRateNum: winRateNum, winRateStr: winRateNum.toFixed(1) };
       });
 
-    // ==========================================
-    // NOVA GUILHOTINA: Foco em Lucro Real e Consistência (> 3 entradas)
-    // ==========================================
     const eliteStrategies = rawReport
       .filter(strat => strat.profit > 0 && strat.signalsSent >= 3)
       .sort((a, b) => b.profit - a.profit);
