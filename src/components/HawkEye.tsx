@@ -10,57 +10,68 @@ export const HawkEye: React.FC<HawkEyeProps> = ({ sessionId, onNumbersDetected }
   const [isScanning, setIsScanning] = useState(false);
   const [status, setStatus] = useState<string>("AGUARDANDO ATIVAÇÃO");
   const [error, setError] = useState<string | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const isScanningRef = useRef(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const startAutonomousScan = async () => {
-    setIsScanning(true);
-    setError(null);
-    setStatus("RADAR ATIVO: VARRENDO A MESA...");
+  const performScan = async () => {
+    if (!isScanningRef.current) return;
 
-    // Loop de varredura autônoma (dispara a cada 8 segundos para cruzar com o tempo do giro real)
-    scanIntervalRef.current = setInterval(async () => {
-      try {
-        setStatus("CAPTURANDO TELA VIA ADB...");
-        
-        // 1. Ordem de disparo para o Cérebro (Back-end) tirar a foto nativa
-        const radarResponse = await fetch('/api/radar/scan');
-        if (!radarResponse.ok) {
-          throw new Error("Falha na varredura. Aguardando próximo ciclo...");
-        }
-        
-        const radarData = await radarResponse.json();
-        
-        if (radarData.numbers && radarData.numbers.length > 0) {
-          setStatus(`ÚLTIMOS NÚMEROS: ${radarData.numbers.join(', ')}`);
-          
-          // 2. Transmite os dados mastigados para sincronizar a sessão
-          await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ numbers: radarData.numbers })
-          });
-          
-          onNumbersDetected(); // Atualiza a tela de sinais do usuário
-        }
-      } catch (err: any) {
-        console.error("[HAWK-EYE ERROR]:", err);
-        setStatus("VARREDURA EM ANDAMENTO...");
-        // Mantemos o radar rodando. Se uma foto sair embaçada, ele acerta na próxima.
+    try {
+      setStatus("CAPTURANDO TELA VIA ADB...");
+      
+      const radarResponse = await fetch('/api/radar/scan');
+      if (!radarResponse.ok) {
+        throw new Error("Falha na varredura da IA. Reajustando mira...");
       }
-    }, 8000); 
+      
+      const radarData = await radarResponse.json();
+      
+      // Se a IA retornar uma quantidade absurda de números (lixo), nós ignoramos
+      if (radarData.numbers && radarData.numbers.length > 0 && radarData.numbers.length <= 15) {
+        setStatus(`ÚLTIMOS NÚMEROS: ${radarData.numbers.join(', ')}`);
+        
+        await fetch(`/api/sessions/${sessionId}/ocr/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ numbers: radarData.numbers })
+        });
+        
+        onNumbersDetected(); 
+      } else if (radarData.numbers && radarData.numbers.length > 15) {
+        setStatus("RUÍDO DETECTADO NA MESA. IGNORANDO...");
+      }
+    } catch (err: any) {
+      console.error("[HAWK-EYE ERROR]:", err);
+      setStatus("VARREDURA EM ANDAMENTO (MANTENDO O RITMO)...");
+    } finally {
+      // CADÊNCIA SEGURA: 22 Segundos (Protege o limite de 5 requisições/minuto da IA Gratuita)
+      if (isScanningRef.current) {
+        setStatus("AGUARDANDO JANELA DE SINCRO (22s)...");
+        timeoutRef.current = setTimeout(performScan, 22000);
+      }
+    }
+  };
+
+  const startAutonomousScan = () => {
+    setIsScanning(true);
+    isScanningRef.current = true;
+    setError(null);
+    setStatus("RADAR ATIVO: INICIANDO VARREDURA...");
+    performScan();
   };
 
   const stopScan = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-    }
     setIsScanning(false);
+    isScanningRef.current = false;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setStatus("RADAR DESATIVADO");
   };
 
   useEffect(() => {
     return () => {
-      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+      isScanningRef.current = false;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, []);
 
