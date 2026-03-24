@@ -1,20 +1,18 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Activity, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
-// IMPORTAÇÃO DOS MÓDULOS ISOLADOS
 import { MacroDashboard } from './pages/MacroDashboard';
 import { SetupSession } from './pages/SetupSession';
 import { LabSimulator } from './pages/LabSimulator';
-// import { ActiveSession } from './pages/ActiveSession';
-// import { AuditReport } from './pages/AuditReport';
+import { ActiveSession } from './pages/ActiveSession';
+import { AuditReport } from './pages/AuditReport';
 
 export default function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-[#0B101E] text-slate-200 font-sans selection:bg-blue-900 selection:text-white flex flex-col">
         
-        {/* HEADER FIXO TIPO TERMINAL */}
         <header className="sticky top-0 z-50 bg-[#0B101E]/95 backdrop-blur-md border-b border-slate-800/80 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
           <div className="w-full max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.href = "/"}>
@@ -34,16 +32,13 @@ export default function App() {
           </div>
         </header>
 
-        {/* MOTOR DE ROTAS DESACOPLADO */}
         <main className="flex-1 w-full max-w-md mx-auto md:max-w-7xl md:px-4 pt-4 px-3 pb-24 md:pb-8">
           <Routes>
             <Route path="/" element={<MacroDashboard />} />
             <Route path="/setup" element={<SetupSession />} />
             <Route path="/lab" element={<LabSimulator />} />
-            
-            {/* Estas rotas serão ativadas nos próximos passos */}
-            {/* <Route path="/session/:id" element={<ActiveSession />} /> */}
-            {/* <Route path="/audit/:id" element={<AuditReport />} /> */}
+            <Route path="/session/:id" element={<ActiveSession />} />
+            <Route path="/audit/:id" element={<AuditReport />} />
           </Routes>
         </main>
       </div>
