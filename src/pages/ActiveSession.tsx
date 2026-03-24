@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Activity, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, TrendingUp, PowerOff } from 'lucide-react';
+import { Activity, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, TrendingUp, PowerOff, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Importação dos seus componentes visuais (ajuste o caminho se necessário)
+// Importação dos seus componentes visuais
 import { SpinTimeline } from '../components/SpinTimeline';
 import { ManualEntryInput } from '../components/ManualEntryInput';
+import { WheelHeatmap } from '../components/WheelHeatmap'; // <-- INJEÇÃO DO HEATMAP
 
 const getPayoutRatio = (stratName: string) => {
   if (!stratName) return 1.0;
@@ -49,7 +50,6 @@ export const ActiveSession: React.FC = () => {
     }
   }, [id, navigate]);
 
-  // Polling de 5 segundos
   useEffect(() => { 
     if (id && data?.session?.status !== "CLOSED") { 
       fetchData(); 
@@ -58,7 +58,6 @@ export const ActiveSession: React.FC = () => {
     } 
   }, [id, data?.session?.status, fetchData]);
 
-  // Cronômetro de Sessão e Time-Stop (50 min)
   useEffect(() => {
     if (!data?.session?.created_at || data?.session?.status === "CLOSED" || activeModal?.type === 'GLOBAL_STOP') return;
     const startTime = new Date(data.session.created_at).getTime();
@@ -73,7 +72,6 @@ export const ActiveSession: React.FC = () => {
     return () => clearInterval(interval);
   }, [data, activeModal?.type]);
 
-  // Lógica de Trailing Stop, Circuit Breaker e Feedback de Sinais
   useEffect(() => {
     if (!data?.session || data.session.status === "CLOSED") return;
     
@@ -82,7 +80,6 @@ export const ActiveSession: React.FC = () => {
     const highestB = data.session.highest_bankroll || initialB;
     const currentSignals = data.session.signals || [];
 
-    // Circuit Breaker (2 Loss Seguidos)
     const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     let cbActive = false; let cbSpinsLeft = 0;
     if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
@@ -92,7 +89,6 @@ export const ActiveSession: React.FC = () => {
     }
     setCircuitBreaker({ active: cbActive, spinsLeft: cbSpinsLeft });
 
-    // Gestão de Risco Dinâmica (Trailing Stop)
     let dynamicStopLimit = initialB * 0.85; 
     let stopLabel = "HARD STOP (-15%)"; 
     let isTrailing = false;
@@ -105,7 +101,6 @@ export const ActiveSession: React.FC = () => {
       return; 
     }
 
-    // Identificação de Mudança de Status do Sinal (Green/Loss/Gale)
     if (activeModal?.type !== 'GLOBAL_STOP') {
       prevSignalsRef.current.forEach(prevSig => {
         if (prevSig.result === 'PENDING') {
@@ -175,7 +170,7 @@ export const ActiveSession: React.FC = () => {
   return (
     <div className="flex flex-col space-y-4">
       
-      {/* HEADER DE PERFORMANCE (Dashboard de Bolso) */}
+      {/* HEADER DE PERFORMANCE */}
       <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 shadow-lg flex justify-between items-center relative overflow-hidden">
         {circuitBreaker.active && (
           <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500"></div>
@@ -196,7 +191,6 @@ export const ActiveSession: React.FC = () => {
         </div>
       </div>
 
-      {/* AVISO DE CIRCUIT BREAKER */}
       {circuitBreaker.active && (
         <div className="bg-yellow-950/30 border border-yellow-900/50 p-3 rounded-lg flex items-center gap-3 animate-pulse">
           <AlertTriangle className="text-yellow-500 w-5 h-5 flex-shrink-0" />
@@ -206,9 +200,20 @@ export const ActiveSession: React.FC = () => {
         </div>
       )}
 
+      {/* HEATMAP FÍSICO DO CILINDRO */}
+      <div className="bg-[#111827] border border-slate-800 rounded-xl p-3 shadow-lg">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <span className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+            <Target className="w-3.5 h-3.5 text-blue-500" /> Heatmap Balístico
+          </span>
+          <span className="text-[8px] font-bold text-slate-600 uppercase border border-slate-700 px-1.5 py-0.5 rounded">Últimos 50 Giros</span>
+        </div>
+        <WheelHeatmap spins={data.session.spins || []} />
+      </div>
+
       {/* LINHA DO TEMPO (Histórico da Roleta) */}
       <div className="bg-[#111827] border border-slate-800 rounded-xl p-3 shadow-lg">
-        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">Radar de Leitura (Últimos Números)</span>
+        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">Radar Sequencial (Últimos Números)</span>
         <SpinTimeline spins={data.session.spins || []} />
       </div>
 
@@ -257,7 +262,7 @@ export const ActiveSession: React.FC = () => {
         ))}
       </div>
 
-      {/* TECLADO DE INSERÇÃO MANUAL (Fixo na parte inferior da área de rolagem) */}
+      {/* TECLADO DE INSERÇÃO MANUAL */}
       <div className="mt-8 pb-4">
          <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 shadow-2xl">
            <div className="flex items-center justify-between mb-3">
@@ -268,7 +273,7 @@ export const ActiveSession: React.FC = () => {
          </div>
       </div>
 
-      {/* SISTEMA DE MODAIS ABSOLUTOS (Green, Loss, Global Stop) */}
+      {/* SISTEMA DE MODAIS */}
       <AnimatePresence>
         {activeModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
