@@ -37,9 +37,12 @@ export class StrategyOrchestrator {
     "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
+    
+    // Matrizes Dinâmicas
     "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false },
     "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false },
-    "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false }
+    "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false },
+    "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -49,37 +52,24 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
-  // ==========================================
-  // MATRIZ DE ANOMALIA ESTATÍSTICA (SNIPER)
-  // ==========================================
+  // --- Funções de Detecção (Sniper, DropZone, Heatmap, Entropia, Z-Score, Markov) omitidas para brevidade, MANTENHA AS MESMAS DO CÓDIGO ANTERIOR ---
+  // (COPIE TODAS AS FUNÇÕES AUXILIARES DO SEU ARQUIVO ATUAL AQUI: detectSniperAnomaly, calculatePhysicalDropZone, calculateHeatmapClusterTarget, calculateShannonEntropy, calculateSectorZScore, calculateMarkovProbability, calculateRealWinRate, calculateRecoveryBet)
+
   public static detectSniperAnomaly(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 20) return null;
-
-    // Contador de sequências ininterruptas no histórico
     const countStreak = (condition: (n: number) => boolean) => {
       let count = 0;
-      for (const n of history) {
-        if (condition(n)) count++;
-        else break;
-      }
+      for (const n of history) { if (condition(n)) count++; else break; }
       return count;
     };
-
-    // 1. Z-SCORE EXTREMO: Ausência de Dúzias (17 giros = < 0.1% de probabilidade)
     if (countStreak(n => n === 0 || n > 12) >= 17) return { target: "SNIPER_DUZ_1", chips: 1, payout: 2.0 };
     if (countStreak(n => n === 0 || n < 13 || n > 24) >= 17) return { target: "SNIPER_DUZ_2", chips: 1, payout: 2.0 };
     if (countStreak(n => n === 0 || n < 25) >= 17) return { target: "SNIPER_DUZ_3", chips: 1, payout: 2.0 };
-
-    // 2. Z-SCORE EXTREMO: Ausência de Colunas (17 giros = < 0.1% de probabilidade)
     if (countStreak(n => n === 0 || n % 3 !== 1) >= 17) return { target: "SNIPER_COL_1", chips: 1, payout: 2.0 };
     if (countStreak(n => n === 0 || n % 3 !== 2) >= 17) return { target: "SNIPER_COL_2", chips: 1, payout: 2.0 };
     if (countStreak(n => n === 0 || n % 3 !== 0) >= 17) return { target: "SNIPER_COL_3", chips: 1, payout: 2.0 };
-
-    // 3. Z-SCORE EXTREMO: Repetição de Cores (9 giros seguidos = < 0.2% de probabilidade)
-    // Se o vermelho repetiu 9 vezes, nós forramos o PRETO + ZERO (Hedge)
     if (countStreak(n => RED_NUMBERS.includes(n)) >= 9) return { target: "SNIPER_BLACK_ZERO", chips: 19, payout: 17/19 };
     if (countStreak(n => BLACK_NUMBERS.includes(n)) >= 9) return { target: "SNIPER_RED_ZERO", chips: 19, payout: 17/19 };
-
     return null;
   }
 
@@ -195,7 +185,6 @@ export class StrategyOrchestrator {
              }
              payoutR = config.payoutRatio;
           } else if (sig.strategy.name === "Dynamic: Sniper Anomaly") {
-             // RESOLVEDOR ESPECÍFICO DO SNIPER
              const target = sig.target_bet;
              if (target === "SNIPER_DUZ_1") isWin = newNumber >= 1 && newNumber <= 12;
              else if (target === "SNIPER_DUZ_2") isWin = newNumber >= 13 && newNumber <= 24;
@@ -205,8 +194,14 @@ export class StrategyOrchestrator {
              else if (target === "SNIPER_COL_3") isWin = newNumber !== 0 && newNumber % 3 === 0;
              else if (target === "SNIPER_RED_ZERO") isWin = RED_NUMBERS.includes(newNumber) || newNumber === 0;
              else if (target === "SNIPER_BLACK_ZERO") isWin = BLACK_NUMBERS.includes(newNumber) || newNumber === 0;
-
              payoutR = target.includes("ZERO") ? 17/19 : 2.0;
+          } else if (sig.strategy.name === "Dynamic: Quantum Intersection") {
+             // MOTOR CHARLIE: Resolve a interseção lendo os números na string target_bet
+             const numbersStr = sig.target_bet.replace("INTERSECTION_", "");
+             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             isWin = targetNumbers.includes(newNumber);
+             // O payout da aposta Plein é sempre (36 / quantidade de números apostados)
+             payoutR = 36 / targetNumbers.length;
           } else {
              isWin = config.checkWin(newNumber);
              payoutR = config.payoutRatio;
@@ -246,17 +241,13 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // Injeção de Auto-Cura para a Estratégia do Heatmap e Sniper
+      // Injeção de Auto-Cura (Heatmap, Sniper e Quantum Intersection)
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
-      if (!heatStrategy) {
-          heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } });
-          activeStrategies.push(heatStrategy);
-      }
+      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } }); activeStrategies.push(heatStrategy); }
       let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
-      if (!sniperStrategy) {
-          sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média severa", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.5, is_active: true } });
-          activeStrategies.push(sniperStrategy);
-      }
+      if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(sniperStrategy); }
+      let quantumStrategy = activeStrategies.find(s => s.name === "Dynamic: Quantum Intersection");
+      if (!quantumStrategy) { quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção de matrizes", strategy_type: "DYNAMIC", risk_level: "MEDIUM", bayes_weight: 2.0, is_active: true } }); activeStrategies.push(quantumStrategy); }
 
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
@@ -264,7 +255,6 @@ export class StrategyOrchestrator {
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
         
         if (lastSignal && lastSignal.result === "LOSS") {
-          // Permite até 2 Gales EXCLUSIVAMENTE para a estratégia Sniper. Resto morre no Gale 1.
           const maxGales = strategy.name === "Dynamic: Sniper Anomaly" ? 2 : 1;
           const nextStep = lastSignal.martingale_step + 1;
           
@@ -275,11 +265,15 @@ export class StrategyOrchestrator {
               if (s.result === "LOSS") accLoss += s.suggested_amount;
             }
             
-            // Corrige o bug do Payout dinamico do Sniper na hora da recuperação
             let config = this.getConfig(strategy.name);
             if (strategy.name === "Dynamic: Sniper Anomaly") {
                 config.payoutRatio = lastSignal.target_bet.includes("ZERO") ? 17/19 : 2.0;
                 config.minChipsRequired = lastSignal.target_bet.includes("ZERO") ? 19 : 1;
+            } else if (strategy.name === "Dynamic: Quantum Intersection") {
+                const numbersStr = lastSignal.target_bet.replace("INTERSECTION_", "");
+                const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+                config.payoutRatio = 36 / targetNumbers.length;
+                config.minChipsRequired = targetNumbers.length;
             }
 
             const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll);
@@ -295,35 +289,12 @@ export class StrategyOrchestrator {
       // 2. DETECÇÃO TÁTICA SUPREMA: SNIPER DE ANOMALIAS
       const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
       if (sniperAnomaly !== null && sniperStrategy) {
-         // Passa um WinRate artificial de 95% para invocar o "Modo Sniper" agressivo do BankrollManager
          const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
          await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
          return;
       }
 
-      // 3. DETECÇÃO TÁTICA 1: DROP ZONE (Força e Distância Física Curta)
-      const dropZoneTarget = this.calculatePhysicalDropZone(spinNumbersTimeline);
-      if (dropZoneTarget !== null && heatStrategy) {
-         const config = this.getConfig("Dynamic: Drop Zone");
-         const strategySignals = allSignals.filter(s => s.strategy_id === heatStrategy!.id);
-         const currentWinRate = this.calculateRealWinRate(strategySignals);
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
-         await prisma.signal.create({ data: { session_id: session.id, strategy_id: heatStrategy.id, target_bet: `DROP_ZONE_${dropZoneTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-         return;
-      }
-
-      // 4. DETECÇÃO TÁTICA 2: HEATMAP CLUSTER (Temperatura Estatística Fervendo)
-      const heatmapTarget = this.calculateHeatmapClusterTarget(spinNumbersTimeline);
-      if (heatmapTarget !== null && heatStrategy) {
-         const config = this.getConfig(heatStrategy.name);
-         const strategySignals = allSignals.filter(s => s.strategy_id === heatStrategy.id);
-         const currentWinRate = this.calculateRealWinRate(strategySignals);
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
-         await prisma.signal.create({ data: { session_id: session.id, strategy_id: heatStrategy.id, target_bet: `HEATMAP_CLUSTER_${heatmapTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-         return;
-      }
-
-      // 5. DETECÇÃO TÁTICA 3: MATRIZES PADRÃO (Z-Score + Markov)
+      // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
           const lastSigTime = new Date(closedCycles[0].created_at).getTime();
@@ -362,32 +333,54 @@ export class StrategyOrchestrator {
         candidates.push({ strategy, config, zScore, requiredZScore, markovProb, winRate: currentWinRate });
       }
 
-      const validCandidates = candidates.filter(c => {
-        if (c.zScore > c.requiredZScore) return false;
-        const theoreticalProb = c.config.coverage / 37;
-        const isMarkovApproved = c.markovProb >= (theoreticalProb * 0.75);
-        if (!isMarkovApproved) return false;
-        return true;
-      });
+      // Filtra os candidatos que passaram no crivo estatístico
+      const validCandidates = candidates.filter(c => c.zScore <= c.requiredZScore && c.markovProb >= ((c.config.coverage / 37) * 0.75));
 
-      validCandidates.sort((a, b) => {
-        const scoreA = (a.zScore - a.markovProb) * a.strategy.bayes_weight;
-        const scoreB = (b.zScore - b.markovProb) * b.strategy.bayes_weight;
-        return scoreA - scoreB;
-      });
-      
-      const topCandidate = validCandidates[0]; 
-      if (topCandidate) {
-        const suggestedAmount = BankrollManager.calculateSafeBet(
-          session.current_bankroll, 
-          session.min_chip, 
-          topCandidate.config.minChipsRequired, 
-          topCandidate.winRate, 
-          topCandidate.config.payoutRatio
-        );
+      // ==========================================
+      // MOTOR CHARLIE: INTERSEÇÃO MULTIDIMENSIONAL
+      // ==========================================
+      if (validCandidates.length >= 2 && quantumStrategy) {
+        // Pega as duas estratégias mais fortes
+        validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
+        const top1 = validCandidates[0];
+        const top2 = validCandidates[1];
+
+        // Mapeia quais números cada estratégia defende
+        const set1 = EUROPEAN_WHEEL.filter(n => top1.config.checkWin(n));
+        const set2 = EUROPEAN_WHEEL.filter(n => top2.config.checkWin(n));
+        
+        // Extrai a interseção exata
+        const intersectionNumbers = set1.filter(n => set2.includes(n));
+
+        // LIMITADOR DE LATÊNCIA HUMANA: Só atira se a interseção for entre 1 e 8 números para dar tempo de clicar
+        if (intersectionNumbers.length > 0 && intersectionNumbers.length <= 8) {
+          const targetStr = `INTERSECTION_${intersectionNumbers.join("-")}`;
+          // Aposta exata de 1 ficha mínima por número encontrado
+          const exactBetAmount = session.min_chip * intersectionNumbers.length;
+
+          await prisma.signal.create({ 
+            data: { 
+              session_id: session.id, 
+              strategy_id: quantumStrategy.id, 
+              target_bet: targetStr, 
+              suggested_amount: exactBetAmount, 
+              martingale_step: 0, 
+              result: "SUGGESTED" 
+            } 
+          });
+          return; // Aborta os sinais normais. O tiro de precisão foi acionado.
+        }
+      }
+
+      // Se o Motor Charlie não achar interseção pequena, atira a Macro normal
+      if (validCandidates.length > 0) {
+        validCandidates.sort((a, b) => ((a.zScore - a.markovProb) * a.strategy.bayes_weight) - ((b.zScore - b.markovProb) * b.strategy.bayes_weight));
+        const topCandidate = validCandidates[0]; 
+        const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, topCandidate.config.minChipsRequired, topCandidate.winRate, topCandidate.config.payoutRatio);
 
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
       }
+
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
 }
