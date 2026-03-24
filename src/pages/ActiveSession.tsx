@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Activity, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, TrendingUp, PowerOff, Target } from 'lucide-react';
+import { Activity, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, TrendingUp, PowerOff, Target, Gauge } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Importação dos seus componentes visuais
 import { SpinTimeline } from '../components/SpinTimeline';
 import { ManualEntryInput } from '../components/ManualEntryInput';
-import { WheelHeatmap } from '../components/WheelHeatmap'; // <-- INJEÇÃO DO HEATMAP
+import { WheelHeatmap } from '../components/WheelHeatmap';
 
 const getPayoutRatio = (stratName: string) => {
   if (!stratName) return 1.0;
@@ -19,7 +19,24 @@ const getPayoutRatio = (stratName: string) => {
   if (stratName.includes("Omega")) return 15 / 21;
   if (stratName.includes("Hedge")) return 9 / 27;
   if (stratName.includes("Macro") || stratName.includes("Zero")) return 17 / 19;
+  if (stratName.includes("Quantum")) return 36.0;
   return 1.0;
+};
+
+// ==========================================
+// MOTOR DE ENTROPIA DE SHANNON (ÍNDICE VIX)
+// ==========================================
+const calculateEntropy = (spins: any[]) => {
+  if (!spins || spins.length < 10) return 0;
+  const sample = spins.slice(0, 37).map((s:any) => s.number !== undefined ? s.number : s);
+  const counts: Record<number, number> = {};
+  sample.forEach((n:number) => counts[n] = (counts[n] || 0) + 1);
+  let entropy = 0;
+  for (const key in counts) {
+    const p = counts[key] / sample.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
 };
 
 export const ActiveSession: React.FC = () => {
@@ -80,7 +97,7 @@ export const ActiveSession: React.FC = () => {
     const highestB = data.session.highest_bankroll || initialB;
     const currentSignals = data.session.signals || [];
 
-    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const closedCycles = currentSignals.filter((s:any) => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step > 0)).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     let cbActive = false; let cbSpinsLeft = 0;
     if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
       const lastStopDate = new Date(closedCycles[0].created_at).getTime();
@@ -107,7 +124,13 @@ export const ActiveSession: React.FC = () => {
           const currSig = currentSignals.find((s:any) => s.id === prevSig.id);
           if (currSig && currSig.result !== 'PENDING') {
             if (currSig.result === 'WIN') {
-              const payout = getPayoutRatio(currSig.strategy?.name);
+              let payout = getPayoutRatio(currSig.strategy?.name);
+              if (currSig.strategy?.name === "Dynamic: Quantum Intersection") {
+                  const targetNumbers = currSig.target_bet.replace("INTERSECTION_", "").split("-");
+                  payout = 36 / targetNumbers.length;
+              } else if (currSig.strategy?.name === "Dynamic: Sniper Anomaly") {
+                  payout = currSig.target_bet.includes("ZERO") ? 17/19 : 2.0;
+              }
               setActiveModal({ type: 'GREEN', data: currSig, metrics: { profitNet: currSig.suggested_amount * payout } });
             } else if (currSig.result === 'LOSS') {
               let accLoss = 0;
@@ -167,13 +190,39 @@ export const ActiveSession: React.FC = () => {
   const activeSignals = data.session.signals?.filter((s:any) => s.result === 'SUGGESTED' || s.result === 'PENDING') || [];
   const formatTime = (ms: number) => { const mins = Math.floor(ms / 60000); const secs = Math.floor((ms % 60000) / 1000); return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; };
 
+  // Lógica do Visor de Caos (Entropia)
+  const spinsList = data.session.spins || [];
+  const currentEntropy = calculateEntropy(spinsList);
+  const MAX_ENTROPY = 5.21; // Log2(37)
+  const entropyPercent = Math.min((currentEntropy / MAX_ENTROPY) * 100, 100);
+
+  let entropyColor = "bg-slate-700";
+  let entropyTextColor = "text-slate-500";
+  let entropyLabel = "COLETANDO DADOS...";
+
+  if (spinsList.length >= 10) {
+    if (currentEntropy > 4.4) {
+      entropyColor = "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]";
+      entropyTextColor = "text-red-400";
+      entropyLabel = "CAOS ABSOLUTO (VIX EXTREMO)";
+    } else if (currentEntropy > 4.0) {
+      entropyColor = "bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.8)]";
+      entropyTextColor = "text-yellow-400";
+      entropyLabel = "TENSÃO ALTA (ALERTA)";
+    } else {
+      entropyColor = "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]";
+      entropyTextColor = "text-emerald-400";
+      entropyLabel = "MESA SUBMISSA (PADRÕES ATIVOS)";
+    }
+  }
+
   return (
     <div className="flex flex-col space-y-4">
       
       {/* HEADER DE PERFORMANCE */}
       <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 shadow-lg flex justify-between items-center relative overflow-hidden">
         {circuitBreaker.active && (
-          <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500"></div>
+          <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500 animate-pulse"></div>
         )}
         <div>
           <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Caixa Atual</span>
@@ -191,6 +240,25 @@ export const ActiveSession: React.FC = () => {
         </div>
       </div>
 
+      {/* VISOR DE CAOS (ÍNDICE VIX / ENTROPIA) */}
+      <div className="bg-[#0B101E] border border-slate-800 rounded-xl p-3 shadow-inner relative overflow-hidden">
+        <div className="flex justify-between items-center mb-2 px-1">
+          <span className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+            <Gauge className="w-3.5 h-3.5 text-purple-500" /> Índice de Caos (VIX)
+          </span>
+          <span className={`text-[9px] font-black uppercase tracking-widest ${entropyTextColor}`}>
+            {entropyLabel}
+          </span>
+        </div>
+        <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+          <div 
+            className={`h-full ${entropyColor} transition-all duration-1000 ease-out`} 
+            style={{ width: spinsList.length >= 10 ? `${entropyPercent}%` : '0%' }}
+          ></div>
+        </div>
+      </div>
+
+      {/* AVISO DE CIRCUIT BREAKER */}
       {circuitBreaker.active && (
         <div className="bg-yellow-950/30 border border-yellow-900/50 p-3 rounded-lg flex items-center gap-3 animate-pulse">
           <AlertTriangle className="text-yellow-500 w-5 h-5 flex-shrink-0" />
@@ -208,13 +276,13 @@ export const ActiveSession: React.FC = () => {
           </span>
           <span className="text-[8px] font-bold text-slate-600 uppercase border border-slate-700 px-1.5 py-0.5 rounded">Últimos 50 Giros</span>
         </div>
-        <WheelHeatmap spins={data.session.spins || []} />
+        <WheelHeatmap spins={spinsList} />
       </div>
 
       {/* LINHA DO TEMPO (Histórico da Roleta) */}
       <div className="bg-[#111827] border border-slate-800 rounded-xl p-3 shadow-lg">
         <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">Radar Sequencial (Últimos Números)</span>
-        <SpinTimeline spins={data.session.spins || []} />
+        <SpinTimeline spins={spinsList} />
       </div>
 
       {/* PAINEL DE SINAIS (Ordens de Operação) */}
