@@ -37,7 +37,8 @@ export class StrategyOrchestrator {
     "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
-    "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false }
+    "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false },
+    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -60,6 +61,55 @@ export class StrategyOrchestrator {
     const avg = Math.round((d1 + d2 + d3) / 3);
     const isConsistent = Math.abs(d1 - avg) <= 2 && Math.abs(d2 - avg) <= 2 && Math.abs(d3 - avg) <= 2;
     if (isConsistent) return EUROPEAN_WHEEL[(EUROPEAN_WHEEL.indexOf(history[0]) + avg) % 37];
+    return null;
+  }
+
+  // ==========================================
+  // MATRIZ DE INTELIGÊNCIA TÉRMICA (HEATMAP)
+  // ==========================================
+  public static calculateHeatmapClusterTarget(history: number[]): number | null {
+    const sample = history.slice(0, 50);
+    const n = sample.length;
+    if (n < 20) return null; // Exige amostra mínima para evitar ruído estatístico
+
+    const frequencies: Record<number, number> = {};
+    EUROPEAN_WHEEL.forEach(num => frequencies[num] = 0);
+    sample.forEach(num => {
+      if (frequencies[num] !== undefined) frequencies[num]++;
+    });
+
+    let bestCenter: number | null = null;
+    let maxClusterHits = 0;
+
+    // Varrer o cilindro procurando o aglomerado de 5 números mais quente
+    for (let i = 0; i < EUROPEAN_WHEEL.length; i++) {
+      const center = EUROPEAN_WHEEL[i];
+      const n1 = EUROPEAN_WHEEL[(i - 2 + 37) % 37];
+      const n2 = EUROPEAN_WHEEL[(i - 1 + 37) % 37];
+      const n3 = EUROPEAN_WHEEL[(i + 1) % 37];
+      const n4 = EUROPEAN_WHEEL[(i + 2) % 37];
+
+      const clusterHits = frequencies[n1] + frequencies[n2] + frequencies[center] + frequencies[n3] + frequencies[n4];
+      
+      if (clusterHits > maxClusterHits) {
+        maxClusterHits = clusterHits;
+        bestCenter = center;
+      }
+    }
+
+    // Validação Algorítmica via Z-Score
+    const p = 5 / 37; // Probabilidade de acertar 5 números na roleta europeia
+    const expected = n * p;
+    const stdDev = Math.sqrt(n * p * (1 - p));
+    if (stdDev === 0) return null;
+
+    const zScore = (maxClusterHits - expected) / stdDev;
+
+    // Se a zona quente estiver além de 2 Desvios Padrão, ataca.
+    if (zScore >= 2.0 && bestCenter !== null) {
+      return bestCenter;
+    }
+
     return null;
   }
 
@@ -101,35 +151,25 @@ export class StrategyOrchestrator {
     return winsImmediatelyAfter / occurrences; 
   }
 
-  // ==========================================
-  // MATEMÁTICA DE GESTÃO DE BANCA
-  // ==========================================
-  
-  // Extrai o Win Rate real da estratégia a partir dos últimos sinais no DB
   private static calculateRealWinRate(strategySignals: any[]): number {
     const concluded = strategySignals.filter(s => s.result === "WIN" || s.result === "LOSS");
-    if (concluded.length < 3) return 0; // Se não tem histórico suficiente, assume 0 para não alavancar
+    if (concluded.length < 3) return 0; 
     const wins = concluded.filter(s => s.result === "WIN").length;
     return (wins / concluded.length) * 100;
   }
 
-  // A função de recuperação antiga adaptada para conter a trava da Banca
   public static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
     let exactBet = (accumulatedLoss + absoluteMinBet) / config.payoutRatio;
-    
-    // TETO DE SEGURANÇA: Um Martingale NUNCA pode ultrapassar 10% da banca atual
     const absoluteMaxBet = bankroll * 0.10; 
     if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
-    
     let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet;
   }
 
   // ==========================================
-  // O MOTOR DE DECISÃO
+  // RESOLUÇÃO DE RESULTADOS
   // ==========================================
-
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
       const activeSignals = await prisma.signal.findMany({ where: { session_id: sessionId, result: { in: ["PENDING", "SUGGESTED"] } }, include: { strategy: true } });
@@ -142,11 +182,16 @@ export class StrategyOrchestrator {
         } else if (sig.result === "PENDING") {
           let isWin = false;
           const config = this.getConfig(sig.strategy.name);
-          if (sig.strategy.name === "Dynamic: Drop Zone") {
-             const targetNum = parseInt(sig.target_bet.split("_")[2]);
-             const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
-             const winningSet = [EUROPEAN_WHEEL[(targetIndex - 2 + 37) % 37], EUROPEAN_WHEEL[(targetIndex - 1 + 37) % 37], targetNum, EUROPEAN_WHEEL[(targetIndex + 1) % 37], EUROPEAN_WHEEL[(targetIndex + 2) % 37]];
-             isWin = winningSet.includes(newNumber);
+          
+          // RESOLVEDOR DINÂMICO PARA AS MATRIZES FÍSICAS
+          if (sig.strategy.name === "Dynamic: Drop Zone" || sig.strategy.name === "Dynamic: Heatmap Cluster") {
+             const targetStr = sig.target_bet.split("_").pop(); // Pega o número alvo da string (ex: DROP_ZONE_17 ou HEATMAP_CLUSTER_17)
+             if (targetStr) {
+                 const targetNum = parseInt(targetStr);
+                 const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
+                 const winningSet = [EUROPEAN_WHEEL[(targetIndex - 2 + 37) % 37], EUROPEAN_WHEEL[(targetIndex - 1 + 37) % 37], targetNum, EUROPEAN_WHEEL[(targetIndex + 1) % 37], EUROPEAN_WHEEL[(targetIndex + 2) % 37]];
+                 isWin = winningSet.includes(newNumber);
+             }
           } else {
              isWin = config.checkWin(newNumber);
           }
@@ -171,6 +216,9 @@ export class StrategyOrchestrator {
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`); }
   }
 
+  // ==========================================
+  // ANÁLISE DO MERCADO E GERAÇÃO DE SINAIS
+  // ==========================================
   public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
@@ -181,6 +229,16 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
+      // Injeção de Auto-Cura para a Estratégia do Heatmap
+      let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
+      if (!heatStrategy) {
+          heatStrategy = await prisma.strategy.create({ 
+              data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos baseados no Heatmap de Z-Score", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } 
+          });
+          activeStrategies.push(heatStrategy);
+      }
+
+      // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -204,6 +262,7 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
+      // 2. DETECÇÃO TÁTICA 1: DROP ZONE (Força e Distância Física Curta)
       const dropZoneTarget = this.calculatePhysicalDropZone(spinNumbersTimeline);
       if (dropZoneTarget !== null) {
          const dropStrategy = activeStrategies.find(s => s.name === "Dynamic: Drop Zone");
@@ -211,8 +270,6 @@ export class StrategyOrchestrator {
             const config = this.getConfig(dropStrategy.name);
             const strategySignals = allSignals.filter(s => s.strategy_id === dropStrategy.id);
             const currentWinRate = this.calculateRealWinRate(strategySignals);
-            
-            // INTELIGÊNCIA FINANCEIRA (KELLY CRITERION)
             const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
             
             await prisma.signal.create({ data: { session_id: session.id, strategy_id: dropStrategy.id, target_bet: `DROP_ZONE_${dropZoneTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
@@ -220,6 +277,21 @@ export class StrategyOrchestrator {
          }
       }
 
+      // 3. DETECÇÃO TÁTICA 2: HEATMAP CLUSTER (Temperatura Estatística Fervendo)
+      const heatmapTarget = this.calculateHeatmapClusterTarget(spinNumbersTimeline);
+      if (heatmapTarget !== null && heatStrategy) {
+         const config = this.getConfig(heatStrategy.name);
+         const strategySignals = allSignals.filter(s => s.strategy_id === heatStrategy.id);
+         const currentWinRate = this.calculateRealWinRate(strategySignals);
+         
+         // Gestão Financeira aplicando Kelly Fracionário
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
+         
+         await prisma.signal.create({ data: { session_id: session.id, strategy_id: heatStrategy.id, target_bet: `HEATMAP_CLUSTER_${heatmapTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+         return;
+      }
+
+      // 4. DETECÇÃO TÁTICA 3: MATRIZES PADRÃO (Z-Score + Markov)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
           const lastSigTime = new Date(closedCycles[0].created_at).getTime();
@@ -230,7 +302,7 @@ export class StrategyOrchestrator {
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number, winRate: number }[] = [];
 
       for (const strategy of activeStrategies) {
-        if (strategy.name === "Dynamic: Drop Zone") continue; 
+        if (strategy.name.includes("Dynamic:")) continue; 
         const config = this.getConfig(strategy.name);
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -274,7 +346,6 @@ export class StrategyOrchestrator {
       
       const topCandidate = validCandidates[0]; 
       if (topCandidate) {
-        // INTELIGÊNCIA FINANCEIRA (KELLY CRITERION NA ESTRATÉGIA PRINCIPAL)
         const suggestedAmount = BankrollManager.calculateSafeBet(
           session.current_bankroll, 
           session.min_chip, 
