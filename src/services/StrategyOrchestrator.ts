@@ -38,7 +38,8 @@ export class StrategyOrchestrator {
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
     "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false },
-    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false }
+    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false },
+    "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -46,6 +47,40 @@ export class StrategyOrchestrator {
       if (strategyName.includes(key)) return config;
     }
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
+  }
+
+  // ==========================================
+  // MATRIZ DE ANOMALIA ESTATÍSTICA (SNIPER)
+  // ==========================================
+  public static detectSniperAnomaly(history: number[]): { target: string, chips: number, payout: number } | null {
+    if (history.length < 20) return null;
+
+    // Contador de sequências ininterruptas no histórico
+    const countStreak = (condition: (n: number) => boolean) => {
+      let count = 0;
+      for (const n of history) {
+        if (condition(n)) count++;
+        else break;
+      }
+      return count;
+    };
+
+    // 1. Z-SCORE EXTREMO: Ausência de Dúzias (17 giros = < 0.1% de probabilidade)
+    if (countStreak(n => n === 0 || n > 12) >= 17) return { target: "SNIPER_DUZ_1", chips: 1, payout: 2.0 };
+    if (countStreak(n => n === 0 || n < 13 || n > 24) >= 17) return { target: "SNIPER_DUZ_2", chips: 1, payout: 2.0 };
+    if (countStreak(n => n === 0 || n < 25) >= 17) return { target: "SNIPER_DUZ_3", chips: 1, payout: 2.0 };
+
+    // 2. Z-SCORE EXTREMO: Ausência de Colunas (17 giros = < 0.1% de probabilidade)
+    if (countStreak(n => n === 0 || n % 3 !== 1) >= 17) return { target: "SNIPER_COL_1", chips: 1, payout: 2.0 };
+    if (countStreak(n => n === 0 || n % 3 !== 2) >= 17) return { target: "SNIPER_COL_2", chips: 1, payout: 2.0 };
+    if (countStreak(n => n === 0 || n % 3 !== 0) >= 17) return { target: "SNIPER_COL_3", chips: 1, payout: 2.0 };
+
+    // 3. Z-SCORE EXTREMO: Repetição de Cores (9 giros seguidos = < 0.2% de probabilidade)
+    // Se o vermelho repetiu 9 vezes, nós forramos o PRETO + ZERO (Hedge)
+    if (countStreak(n => RED_NUMBERS.includes(n)) >= 9) return { target: "SNIPER_BLACK_ZERO", chips: 19, payout: 17/19 };
+    if (countStreak(n => BLACK_NUMBERS.includes(n)) >= 9) return { target: "SNIPER_RED_ZERO", chips: 19, payout: 17/19 };
+
+    return null;
   }
 
   public static calculatePhysicalDropZone(history: number[]): number | null {
@@ -64,65 +99,31 @@ export class StrategyOrchestrator {
     return null;
   }
 
-  // ==========================================
-  // MATRIZ DE INTELIGÊNCIA TÉRMICA (HEATMAP)
-  // ==========================================
   public static calculateHeatmapClusterTarget(history: number[]): number | null {
-    const sample = history.slice(0, 50);
-    const n = sample.length;
-    if (n < 20) return null; // Exige amostra mínima para evitar ruído estatístico
-
+    const sample = history.slice(0, 50); const n = sample.length;
+    if (n < 20) return null; 
     const frequencies: Record<number, number> = {};
     EUROPEAN_WHEEL.forEach(num => frequencies[num] = 0);
-    sample.forEach(num => {
-      if (frequencies[num] !== undefined) frequencies[num]++;
-    });
+    sample.forEach(num => { if (frequencies[num] !== undefined) frequencies[num]++; });
 
-    let bestCenter: number | null = null;
-    let maxClusterHits = 0;
-
-    // Varrer o cilindro procurando o aglomerado de 5 números mais quente
+    let bestCenter: number | null = null; let maxClusterHits = 0;
     for (let i = 0; i < EUROPEAN_WHEEL.length; i++) {
       const center = EUROPEAN_WHEEL[i];
-      const n1 = EUROPEAN_WHEEL[(i - 2 + 37) % 37];
-      const n2 = EUROPEAN_WHEEL[(i - 1 + 37) % 37];
-      const n3 = EUROPEAN_WHEEL[(i + 1) % 37];
-      const n4 = EUROPEAN_WHEEL[(i + 2) % 37];
-
-      const clusterHits = frequencies[n1] + frequencies[n2] + frequencies[center] + frequencies[n3] + frequencies[n4];
-      
-      if (clusterHits > maxClusterHits) {
-        maxClusterHits = clusterHits;
-        bestCenter = center;
-      }
+      const clusterHits = frequencies[EUROPEAN_WHEEL[(i - 2 + 37) % 37]] + frequencies[EUROPEAN_WHEEL[(i - 1 + 37) % 37]] + frequencies[center] + frequencies[EUROPEAN_WHEEL[(i + 1) % 37]] + frequencies[EUROPEAN_WHEEL[(i + 2) % 37]];
+      if (clusterHits > maxClusterHits) { maxClusterHits = clusterHits; bestCenter = center; }
     }
-
-    // Validação Algorítmica via Z-Score
-    const p = 5 / 37; // Probabilidade de acertar 5 números na roleta europeia
-    const expected = n * p;
-    const stdDev = Math.sqrt(n * p * (1 - p));
+    const p = 5 / 37; const expected = n * p; const stdDev = Math.sqrt(n * p * (1 - p));
     if (stdDev === 0) return null;
-
-    const zScore = (maxClusterHits - expected) / stdDev;
-
-    // Se a zona quente estiver além de 2 Desvios Padrão, ataca.
-    if (zScore >= 2.0 && bestCenter !== null) {
-      return bestCenter;
-    }
-
+    if ((maxClusterHits - expected) / stdDev >= 2.0 && bestCenter !== null) return bestCenter;
     return null;
   }
 
   public static calculateShannonEntropy(history: number[]): number {
     if (history.length < 10) return 0;
-    const sample = history.slice(0, 37);
-    const counts: Record<number, number> = {};
+    const sample = history.slice(0, 37); const counts: Record<number, number> = {};
     sample.forEach(n => counts[n] = (counts[n] || 0) + 1);
     let entropy = 0;
-    for (const key in counts) {
-      const p = counts[key] / sample.length;
-      entropy -= p * Math.log2(p);
-    }
+    for (const key in counts) { const p = counts[key] / sample.length; entropy -= p * Math.log2(p); }
     return entropy;
   }
 
@@ -181,21 +182,37 @@ export class StrategyOrchestrator {
           await prisma.signal.update({ where: { id: sig.id }, data: { result: "MISSED" } });
         } else if (sig.result === "PENDING") {
           let isWin = false;
+          let payoutR = 1.0;
           const config = this.getConfig(sig.strategy.name);
           
-          // RESOLVEDOR DINÂMICO PARA AS MATRIZES FÍSICAS
           if (sig.strategy.name === "Dynamic: Drop Zone" || sig.strategy.name === "Dynamic: Heatmap Cluster") {
-             const targetStr = sig.target_bet.split("_").pop(); // Pega o número alvo da string (ex: DROP_ZONE_17 ou HEATMAP_CLUSTER_17)
+             const targetStr = sig.target_bet.split("_").pop(); 
              if (targetStr) {
                  const targetNum = parseInt(targetStr);
                  const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
                  const winningSet = [EUROPEAN_WHEEL[(targetIndex - 2 + 37) % 37], EUROPEAN_WHEEL[(targetIndex - 1 + 37) % 37], targetNum, EUROPEAN_WHEEL[(targetIndex + 1) % 37], EUROPEAN_WHEEL[(targetIndex + 2) % 37]];
                  isWin = winningSet.includes(newNumber);
              }
+             payoutR = config.payoutRatio;
+          } else if (sig.strategy.name === "Dynamic: Sniper Anomaly") {
+             // RESOLVEDOR ESPECÍFICO DO SNIPER
+             const target = sig.target_bet;
+             if (target === "SNIPER_DUZ_1") isWin = newNumber >= 1 && newNumber <= 12;
+             else if (target === "SNIPER_DUZ_2") isWin = newNumber >= 13 && newNumber <= 24;
+             else if (target === "SNIPER_DUZ_3") isWin = newNumber >= 25 && newNumber <= 36;
+             else if (target === "SNIPER_COL_1") isWin = newNumber !== 0 && newNumber % 3 === 1;
+             else if (target === "SNIPER_COL_2") isWin = newNumber !== 0 && newNumber % 3 === 2;
+             else if (target === "SNIPER_COL_3") isWin = newNumber !== 0 && newNumber % 3 === 0;
+             else if (target === "SNIPER_RED_ZERO") isWin = RED_NUMBERS.includes(newNumber) || newNumber === 0;
+             else if (target === "SNIPER_BLACK_ZERO") isWin = BLACK_NUMBERS.includes(newNumber) || newNumber === 0;
+
+             payoutR = target.includes("ZERO") ? 17/19 : 2.0;
           } else {
              isWin = config.checkWin(newNumber);
+             payoutR = config.payoutRatio;
           }
-          const profitNet = isWin ? (sig.suggested_amount * config.payoutRatio) : -sig.suggested_amount;
+
+          const profitNet = isWin ? (sig.suggested_amount * payoutR) : -sig.suggested_amount;
           totalProfitDelta += profitNet;
           await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
 
@@ -229,13 +246,16 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // Injeção de Auto-Cura para a Estratégia do Heatmap
+      // Injeção de Auto-Cura para a Estratégia do Heatmap e Sniper
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
       if (!heatStrategy) {
-          heatStrategy = await prisma.strategy.create({ 
-              data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos baseados no Heatmap de Z-Score", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } 
-          });
+          heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } });
           activeStrategies.push(heatStrategy);
+      }
+      let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
+      if (!sniperStrategy) {
+          sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média severa", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.5, is_active: true } });
+          activeStrategies.push(sniperStrategy);
       }
 
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
@@ -244,16 +264,26 @@ export class StrategyOrchestrator {
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
         
         if (lastSignal && lastSignal.result === "LOSS") {
+          // Permite até 2 Gales EXCLUSIVAMENTE para a estratégia Sniper. Resto morre no Gale 1.
+          const maxGales = strategy.name === "Dynamic: Sniper Anomaly" ? 2 : 1;
           const nextStep = lastSignal.martingale_step + 1;
-          if (nextStep <= 1) { 
+          
+          if (nextStep <= maxGales) { 
             let accLoss = 0;
             for (const s of strategySignals) {
-              if (s.result === "WIN" || s.result === "MISSED" || (s.result === "LOSS" && s.martingale_step === 1)) break;
+              if (s.result === "WIN" || s.result === "MISSED" || (s.result === "LOSS" && s.martingale_step === maxGales)) break;
               if (s.result === "LOSS") accLoss += s.suggested_amount;
             }
-            const config = this.getConfig(strategy.name);
+            
+            // Corrige o bug do Payout dinamico do Sniper na hora da recuperação
+            let config = this.getConfig(strategy.name);
+            if (strategy.name === "Dynamic: Sniper Anomaly") {
+                config.payoutRatio = lastSignal.target_bet.includes("ZERO") ? 17/19 : 2.0;
+                config.minChipsRequired = lastSignal.target_bet.includes("ZERO") ? 19 : 1;
+            }
+
             const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: config.targetBet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
+            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: lastSignal.target_bet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
             return; 
           }
         }
@@ -262,36 +292,38 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // 2. DETECÇÃO TÁTICA 1: DROP ZONE (Força e Distância Física Curta)
-      const dropZoneTarget = this.calculatePhysicalDropZone(spinNumbersTimeline);
-      if (dropZoneTarget !== null) {
-         const dropStrategy = activeStrategies.find(s => s.name === "Dynamic: Drop Zone");
-         if (dropStrategy) {
-            const config = this.getConfig(dropStrategy.name);
-            const strategySignals = allSignals.filter(s => s.strategy_id === dropStrategy.id);
-            const currentWinRate = this.calculateRealWinRate(strategySignals);
-            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
-            
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: dropStrategy.id, target_bet: `DROP_ZONE_${dropZoneTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-            return;
-         }
+      // 2. DETECÇÃO TÁTICA SUPREMA: SNIPER DE ANOMALIAS
+      const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
+      if (sniperAnomaly !== null && sniperStrategy) {
+         // Passa um WinRate artificial de 95% para invocar o "Modo Sniper" agressivo do BankrollManager
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
+         await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+         return;
       }
 
-      // 3. DETECÇÃO TÁTICA 2: HEATMAP CLUSTER (Temperatura Estatística Fervendo)
+      // 3. DETECÇÃO TÁTICA 1: DROP ZONE (Força e Distância Física Curta)
+      const dropZoneTarget = this.calculatePhysicalDropZone(spinNumbersTimeline);
+      if (dropZoneTarget !== null && heatStrategy) {
+         const config = this.getConfig("Dynamic: Drop Zone");
+         const strategySignals = allSignals.filter(s => s.strategy_id === heatStrategy!.id);
+         const currentWinRate = this.calculateRealWinRate(strategySignals);
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
+         await prisma.signal.create({ data: { session_id: session.id, strategy_id: heatStrategy.id, target_bet: `DROP_ZONE_${dropZoneTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+         return;
+      }
+
+      // 4. DETECÇÃO TÁTICA 2: HEATMAP CLUSTER (Temperatura Estatística Fervendo)
       const heatmapTarget = this.calculateHeatmapClusterTarget(spinNumbersTimeline);
       if (heatmapTarget !== null && heatStrategy) {
          const config = this.getConfig(heatStrategy.name);
          const strategySignals = allSignals.filter(s => s.strategy_id === heatStrategy.id);
          const currentWinRate = this.calculateRealWinRate(strategySignals);
-         
-         // Gestão Financeira aplicando Kelly Fracionário
          const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
-         
          await prisma.signal.create({ data: { session_id: session.id, strategy_id: heatStrategy.id, target_bet: `HEATMAP_CLUSTER_${heatmapTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
          return;
       }
 
-      // 4. DETECÇÃO TÁTICA 3: MATRIZES PADRÃO (Z-Score + Markov)
+      // 5. DETECÇÃO TÁTICA 3: MATRIZES PADRÃO (Z-Score + Markov)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
           const lastSigTime = new Date(closedCycles[0].created_at).getTime();
