@@ -1,4 +1,5 @@
 import { PrismaClient, Strategy, Session, Spin } from "@prisma/client";
+import { BankrollManager } from "./BankrollManager";
 
 const prisma = new PrismaClient();
 
@@ -100,22 +101,34 @@ export class StrategyOrchestrator {
     return winsImmediatelyAfter / occurrences; 
   }
 
-  public static calculateBaseBet(config: StrategyConfig, bankroll: number, minChip: number): number {
-    const absoluteMinBet = minChip * config.minChipsRequired; 
-    const optimalExposure = bankroll * 0.015; 
-    if (optimalExposure < absoluteMinBet) return absoluteMinBet; 
-    let multiplierSteps = Math.floor(optimalExposure / absoluteMinBet); 
-    if (multiplierSteps < 1) multiplierSteps = 1;
-    return multiplierSteps * absoluteMinBet; 
+  // ==========================================
+  // MATEMÁTICA DE GESTÃO DE BANCA
+  // ==========================================
+  
+  // Extrai o Win Rate real da estratégia a partir dos últimos sinais no DB
+  private static calculateRealWinRate(strategySignals: any[]): number {
+    const concluded = strategySignals.filter(s => s.result === "WIN" || s.result === "LOSS");
+    if (concluded.length < 3) return 0; // Se não tem histórico suficiente, assume 0 para não alavancar
+    const wins = concluded.filter(s => s.result === "WIN").length;
+    return (wins / concluded.length) * 100;
   }
 
+  // A função de recuperação antiga adaptada para conter a trava da Banca
   public static calculateRecoveryBet(accumulatedLoss: number, config: StrategyConfig, minChip: number, bankroll: number): number {
     const absoluteMinBet = minChip * config.minChipsRequired;
     let exactBet = (accumulatedLoss + absoluteMinBet) / config.payoutRatio;
-    const absoluteMaxBet = bankroll * 0.10; if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    
+    // TETO DE SEGURANÇA: Um Martingale NUNCA pode ultrapassar 10% da banca atual
+    const absoluteMaxBet = bankroll * 0.10; 
+    if (exactBet > absoluteMaxBet) exactBet = absoluteMaxBet;
+    
     let steps = Math.ceil(exactBet / absoluteMinBet); if (steps < 1) steps = 1;
     return steps * absoluteMinBet;
   }
+
+  // ==========================================
+  // O MOTOR DE DECISÃO
+  // ==========================================
 
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
@@ -196,7 +209,12 @@ export class StrategyOrchestrator {
          const dropStrategy = activeStrategies.find(s => s.name === "Dynamic: Drop Zone");
          if (dropStrategy) {
             const config = this.getConfig(dropStrategy.name);
-            const suggestedAmount = this.calculateBaseBet(config, session.current_bankroll, session.min_chip);
+            const strategySignals = allSignals.filter(s => s.strategy_id === dropStrategy.id);
+            const currentWinRate = this.calculateRealWinRate(strategySignals);
+            
+            // INTELIGÊNCIA FINANCEIRA (KELLY CRITERION)
+            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, config.minChipsRequired, currentWinRate, config.payoutRatio);
+            
             await prisma.signal.create({ data: { session_id: session.id, strategy_id: dropStrategy.id, target_bet: `DROP_ZONE_${dropZoneTarget}`, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
             return;
          }
@@ -209,7 +227,7 @@ export class StrategyOrchestrator {
           if (spinsSince < 20) return;
       }
 
-      let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number }[] = [];
+      let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number, winRate: number }[] = [];
 
       for (const strategy of activeStrategies) {
         if (strategy.name === "Dynamic: Drop Zone") continue; 
@@ -235,8 +253,9 @@ export class StrategyOrchestrator {
         
         const zScore = this.calculateSectorZScore(spinNumbersTimeline, config);
         const markovProb = this.calculateMarkovProbability(spinNumbersTimeline, config);
+        const currentWinRate = this.calculateRealWinRate(strategySignals);
         
-        candidates.push({ strategy, config, zScore, requiredZScore, markovProb });
+        candidates.push({ strategy, config, zScore, requiredZScore, markovProb, winRate: currentWinRate });
       }
 
       const validCandidates = candidates.filter(c => {
@@ -255,7 +274,15 @@ export class StrategyOrchestrator {
       
       const topCandidate = validCandidates[0]; 
       if (topCandidate) {
-        const suggestedAmount = this.calculateBaseBet(topCandidate.config, session.current_bankroll, session.min_chip);
+        // INTELIGÊNCIA FINANCEIRA (KELLY CRITERION NA ESTRATÉGIA PRINCIPAL)
+        const suggestedAmount = BankrollManager.calculateSafeBet(
+          session.current_bankroll, 
+          session.min_chip, 
+          topCandidate.config.minChipsRequired, 
+          topCandidate.winRate, 
+          topCandidate.config.payoutRatio
+        );
+
         await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
