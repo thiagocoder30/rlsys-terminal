@@ -72,11 +72,12 @@ export const AuditReport: React.FC = () => {
           </h2>
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Auditoria de Sessão</p>
         </div>
-        <button onClick={() => navigate("/")} className="text-[10px] font-black uppercase tracking-widest text-slate-400 border border-slate-700 px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 flex items-center gap-1">
+        <button onClick={() => navigate("/")} className="text-[10px] font-black uppercase tracking-widest text-slate-400 border border-slate-700 px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 flex items-center gap-1 transition-colors">
           <ArrowLeft className="w-3 h-3" /> VOLTAR
         </button>
       </div>
 
+      {/* CARD DE DIAGNÓSTICO PRINCIPAL */}
       <div className={`p-6 rounded-2xl border shadow-xl ${diag.bg} ${diag.border}`}>
         <div className="flex justify-between items-start mb-6 border-b border-slate-800/50 pb-4">
           <div>
@@ -104,23 +105,37 @@ export const AuditReport: React.FC = () => {
         </div>
       </div>
 
+      {/* CARD DE MÉTRICAS OPERACIONAIS ENRIQUECIDO */}
       <div className="bg-[#111827] border border-slate-800 p-6 rounded-2xl shadow-xl">
         <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Métricas Operacionais</span>
-        <div className="grid grid-cols-2 gap-4">
+        
+        <div className="grid grid-cols-2 gap-y-6 gap-x-4">
           <div>
-            <span className="text-[10px] uppercase text-slate-500 font-bold block">Banca Inicial</span>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Banca Inicial</span>
             <span className="text-lg font-mono font-black text-slate-200">R$ {auditData.initial_bankroll.toFixed(2)}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase text-slate-500 font-bold block">Pico Máximo</span>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Banca Final</span>
+            <span className="text-lg font-mono font-black text-white">R$ {auditData.current_bankroll.toFixed(2)}</span>
+          </div>
+          
+          <div>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Pico Máximo</span>
             <span className="text-lg font-mono font-black text-emerald-400">R$ {(auditData.highest_bankroll || auditData.initial_bankroll).toFixed(2)}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase text-slate-500 font-bold block">Giros Registrados</span>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Lucro / Prejuízo</span>
+            <span className={`text-lg font-mono font-black ${isGreen ? 'text-emerald-400' : 'text-red-400'}`}>
+              {isGreen ? '+' : ''}R$ {pnl.toFixed(2)}
+            </span>
+          </div>
+
+          <div>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Giros Registrados</span>
             <span className="text-lg font-mono font-black text-slate-200">{auditData.spins?.length || 0}</span>
           </div>
           <div>
-            <span className="text-[10px] uppercase text-slate-500 font-bold block">Sinais Emitidos</span>
+            <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Sinais Emitidos</span>
             <span className="text-lg font-mono font-black text-slate-200">{auditData.signals?.length || 0}</span>
           </div>
         </div>
