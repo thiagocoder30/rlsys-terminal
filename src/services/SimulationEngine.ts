@@ -55,9 +55,6 @@ export class SimulationEngine {
         if (currentBankroll > peakBankroll) peakBankroll = currentBankroll;
         const currentDrawdown = peakBankroll - currentBankroll;
         if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
-        
-        // CORREÇÃO CRÍTICA: Removido o 'break' de Stop Loss Global durante o Backtest.
-        // O simulador precisa processar todos os 500 números para achar a taxa de acerto real das matrizes.
       }
 
       simulatedHistory.unshift(currentNumber);
@@ -113,8 +110,11 @@ export class SimulationEngine {
         return { name, signalsSent: data.signals, wins: data.wins, losses: data.losses, profit: data.profit, winRateNum: winRateNum, winRateStr: winRateNum.toFixed(1) };
       });
 
+    // ==========================================
+    // NOVA GUILHOTINA: Foco em Lucro Real e Consistência (> 3 entradas)
+    // ==========================================
     const eliteStrategies = rawReport
-      .filter(strat => strat.winRateNum >= 70.0 && strat.profit > 0)
+      .filter(strat => strat.profit > 0 && strat.signalsSent >= 3)
       .sort((a, b) => b.profit - a.profit);
 
     let safeNetProfit = 0; let totalEliteConcluded = 0; let totalEliteWins = 0;
@@ -129,18 +129,14 @@ export class SimulationEngine {
       name: strat.name, signalsSent: strat.signalsSent, wins: strat.wins, losses: strat.losses, profit: strat.profit, winRate: strat.winRateStr
     }));
 
-    // ==========================================
-    // VEREDITO BLINDADO E CORRIGIDO
-    // O veredito agora respeita APENAS a saúde do Esquadrão de Elite (safeNetProfit)
-    // ==========================================
     let verdict: "GREEN_LIGHT" | "RED_LIGHT" | "WARNING" = "RED_LIGHT";
     
     if (finalEntropy > 4.6) {
-      verdict = "RED_LIGHT"; // Caos absoluto detectado na física da roleta
+      verdict = "RED_LIGHT"; 
     } else if (eliteStrategies.length > 0 && safeNetProfit >= (initialBankroll * 0.02)) {
-      verdict = "GREEN_LIGHT"; // Elite filtrou o lixo e garantiu lucro mínimo de 2%
+      verdict = "GREEN_LIGHT"; 
     } else if (eliteStrategies.length > 0 && safeNetProfit > 0) {
-      verdict = "WARNING"; // Elite teve lucro, mas abaixo de 2% (Risco Amarelo)
+      verdict = "WARNING"; 
     }
 
     const entropyStatus = finalEntropy > 4.6 ? "CAOS" : (finalEntropy > 4.0 ? "VOLÁTIL" : "ESTÁVEL");
