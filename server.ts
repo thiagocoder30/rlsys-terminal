@@ -51,12 +51,10 @@ function getNumberHalf(num: number): string {
 }
 
 // ==========================================
-// ROTA DO RADAR AUTÔNOMO (COM AUTO-RECONEXÃO)
+// ROTA DO RADAR AUTÔNOMO (COM FOCO ESTRITO)
 // ==========================================
 app.get("/api/radar/scan", async (req, res) => {
   try {
-    // SISTEMA DE AUTO-HEAL: Força a reconexão na porta fixa antes de cada tiro
-    // Se a conexão piscar, o próprio servidor conserta sem você precisar ir no Termux
     await execPromise("adb connect localhost:5555").catch(() => {});
 
     console.log("[HAWK-EYE] Disparando captura de tela via ADB...");
@@ -75,8 +73,15 @@ app.get("/api/radar/scan", async (req, res) => {
       generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } 
     });
     
+    // NOVO PROMPT APLICADO AQUI (Ignora lixo visual da mesa)
     const result = await model.generateContent([
-      `You are an OCR. Extract ALL numbers from the provided roulette image. Return JSON: {"numbers": []}`, 
+      `You are a highly precise OCR for a roulette game. 
+      CRITICAL INSTRUCTIONS: 
+      1. IGNORE the main 0-36 betting board grid entirely.
+      2. IGNORE player balances, money values, and chat.
+      3. Look ONLY for the single horizontal row of recently drawn numbers (usually displayed inside small red, black, or green pill shapes).
+      4. Extract ONLY these recent history numbers, reading from left to right.
+      Return ONLY valid JSON: {"numbers": [int, int, ...]}`, 
       { inlineData: { data: base64Image, mimeType: "image/png" } }
     ]);
     
@@ -97,7 +102,7 @@ app.get("/api/radar/scan", async (req, res) => {
 });
 
 // ==========================================
-// ROTA MANUAL DE OCR (LEGADO)
+// ROTA MANUAL DE OCR (LEGADO ATUALIZADO)
 // ==========================================
 app.post("/api/ocr", async (req, res) => {
   try {
@@ -114,7 +119,13 @@ app.post("/api/ocr", async (req, res) => {
     });
     
     const result = await model.generateContent([
-      `You are an OCR. Extract ALL numbers from the provided roulette image. Return JSON: {"numbers": []}`, 
+      `You are a highly precise OCR for a roulette game. 
+      CRITICAL INSTRUCTIONS: 
+      1. IGNORE the main 0-36 betting board grid entirely.
+      2. IGNORE player balances, money values, and chat.
+      3. Look ONLY for the single horizontal row of recently drawn numbers (usually displayed inside small red, black, or green pill shapes).
+      4. Extract ONLY these recent history numbers, reading from left to right.
+      Return ONLY valid JSON: {"numbers": [int, int, ...]}`, 
       { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
     ]);
     
