@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Save, Database } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Mapeamento dos Setores da Roleta
@@ -22,14 +22,15 @@ const getPayout = (sector: string) => {
   return 1.0;
 };
 
-export const LabDashboard: React.FC = () => {
+// CORREÇÃO AQUI: Exportando como LabSimulator para bater com o App.tsx
+export const LabSimulator: React.FC = () => {
   const navigate = useNavigate();
   const [historySpins, setHistorySpins] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Estados do Construtor No-Code
   const [stratName, setStratName] = useState("Minha Tática Sniper");
-  const [conditionType, setConditionType] = useState("DELAY"); // DELAY (Atraso) ou STREAK (Repetição)
+  const [conditionType, setConditionType] = useState("DELAY"); 
   const [conditionSector, setConditionSector] = useState("RED");
   const [conditionThreshold, setConditionThreshold] = useState(5);
   const [targetSector, setTargetSector] = useState("BLACK");
@@ -43,11 +44,10 @@ export const LabDashboard: React.FC = () => {
         const res = await fetch("/api/macro");
         const data = await res.json();
         let allSpins: number[] = [];
-        // Extrai todos os giros de todas as sessões para formar o Big Data
         if (data.sessions) {
           data.sessions.forEach((s: any) => {
             if (s.spins) {
-              const sessionSpins = s.spins.map((spin: any) => spin.number).reverse(); // Ordena do mais antigo pro mais novo
+              const sessionSpins = s.spins.map((spin: any) => spin.number).reverse(); 
               allSpins = [...allSpins, ...sessionSpins];
             }
           });
@@ -67,7 +67,7 @@ export const LabDashboard: React.FC = () => {
       alert("Aviso: Poucos dados históricos. O teste pode não ser matematicamente preciso. Opere mais na mesa para gerar dados.");
     }
 
-    let theoreticalBankroll = 100; // Banca simulada padrão
+    let theoreticalBankroll = 100; 
     let wins = 0;
     let losses = 0;
     let gales = 0;
@@ -80,43 +80,37 @@ export const LabDashboard: React.FC = () => {
     for (let i = 0; i < historySpins.length; i++) {
       const currentNumber = historySpins[i];
 
-      // 1. Resolve apostas pendentes do giro anterior
       if (activeBet) {
         const isWin = currentNumber !== 0 && SECTORS[activeBet.target].includes(currentNumber);
         
         if (isWin) {
           theoreticalBankroll += activeBet.amount * getPayout(activeBet.target);
           wins++;
-          activeBet = null; // Reseta após vitória
+          activeBet = null; 
         } else {
           theoreticalBankroll -= activeBet.amount;
           
-          // Lógica de Martingale Automático (1 Gale apenas para o teste)
           if (activeBet.step === 0) {
             activeBet = { target: activeBet.target, amount: activeBet.amount * 2, step: 1 };
             gales++;
           } else {
             losses++;
-            activeBet = null; // Aceita a perda no Gale 1
+            activeBet = null; 
           }
         }
 
-        // Calcula Drawdown
         if (theoreticalBankroll > peakBankroll) peakBankroll = theoreticalBankroll;
         const currentDrawdown = peakBankroll - theoreticalBankroll;
         if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
       }
 
-      // 2. Analisa o histórico para gerar novos sinais
       if (!activeBet && i >= conditionThreshold) {
         const window = historySpins.slice(i - conditionThreshold, i);
         let trigger = false;
 
         if (conditionType === "DELAY") {
-          // Atraso: O setor NÃO saiu nenhuma vez na janela
           trigger = window.every(num => num === 0 || !SECTORS[conditionSector].includes(num));
         } else if (conditionType === "STREAK") {
-          // Repetição: O setor saiu em TODOS os giros da janela
           trigger = window.every(num => num !== 0 && SECTORS[conditionSector].includes(num));
         }
 
@@ -155,7 +149,6 @@ export const LabDashboard: React.FC = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col space-y-6 pb-6">
       
-      {/* HEADER */}
       <div className="flex justify-between items-center mt-2 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2">
@@ -168,7 +161,6 @@ export const LabDashboard: React.FC = () => {
         </button>
       </div>
 
-      {/* CONSTRUTOR NO-CODE */}
       <div className="bg-[#111827] border border-slate-800 p-5 rounded-2xl shadow-xl">
         <span className="flex items-center gap-2 text-[10px] uppercase font-black text-slate-400 tracking-widest mb-4">
           <Database className="w-3.5 h-3.5 text-blue-500" /> Parâmetros da Estratégia
@@ -217,7 +209,6 @@ export const LabDashboard: React.FC = () => {
         </button>
       </div>
 
-      {/* RESULTADOS DA SIMULAÇÃO */}
       {simResult && (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className={`p-6 rounded-2xl border shadow-2xl ${simResult.isProfitable ? 'bg-emerald-950/30 border-emerald-900/50' : 'bg-red-950/30 border-red-900/50'}`}>
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/50">
