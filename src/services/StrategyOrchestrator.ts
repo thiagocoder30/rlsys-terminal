@@ -52,9 +52,6 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
-  // --- Funções de Detecção (Sniper, DropZone, Heatmap, Entropia, Z-Score, Markov) omitidas para brevidade, MANTENHA AS MESMAS DO CÓDIGO ANTERIOR ---
-  // (COPIE TODAS AS FUNÇÕES AUXILIARES DO SEU ARQUIVO ATUAL AQUI: detectSniperAnomaly, calculatePhysicalDropZone, calculateHeatmapClusterTarget, calculateShannonEntropy, calculateSectorZScore, calculateMarkovProbability, calculateRealWinRate, calculateRecoveryBet)
-
   public static detectSniperAnomaly(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 20) return null;
     const countStreak = (condition: (n: number) => boolean) => {
@@ -196,11 +193,9 @@ export class StrategyOrchestrator {
              else if (target === "SNIPER_BLACK_ZERO") isWin = BLACK_NUMBERS.includes(newNumber) || newNumber === 0;
              payoutR = target.includes("ZERO") ? 17/19 : 2.0;
           } else if (sig.strategy.name === "Dynamic: Quantum Intersection") {
-             // MOTOR CHARLIE: Resolve a interseção lendo os números na string target_bet
              const numbersStr = sig.target_bet.replace("INTERSECTION_", "");
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber);
-             // O payout da aposta Plein é sempre (36 / quantidade de números apostados)
              payoutR = 36 / targetNumbers.length;
           } else {
              isWin = config.checkWin(newNumber);
@@ -241,13 +236,24 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // Injeção de Auto-Cura (Heatmap, Sniper e Quantum Intersection)
+      // Injeção de Auto-Cura (Correção de Schema Aplicada)
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
-      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.0, is_active: true } }); activeStrategies.push(heatStrategy); }
+      if (!heatStrategy) { 
+          heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", bayes_weight: 1.0, is_active: true } }); 
+          activeStrategies.push(heatStrategy); 
+      }
+      
       let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
-      if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", strategy_type: "DYNAMIC", risk_level: "HIGH", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(sniperStrategy); }
+      if (!sniperStrategy) { 
+          sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", bayes_weight: 1.5, is_active: true } }); 
+          activeStrategies.push(sniperStrategy); 
+      }
+      
       let quantumStrategy = activeStrategies.find(s => s.name === "Dynamic: Quantum Intersection");
-      if (!quantumStrategy) { quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção de matrizes", strategy_type: "DYNAMIC", risk_level: "MEDIUM", bayes_weight: 2.0, is_active: true } }); activeStrategies.push(quantumStrategy); }
+      if (!quantumStrategy) { 
+          quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção de matrizes", bayes_weight: 2.0, is_active: true } }); 
+          activeStrategies.push(quantumStrategy); 
+      }
 
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
@@ -333,29 +339,20 @@ export class StrategyOrchestrator {
         candidates.push({ strategy, config, zScore, requiredZScore, markovProb, winRate: currentWinRate });
       }
 
-      // Filtra os candidatos que passaram no crivo estatístico
       const validCandidates = candidates.filter(c => c.zScore <= c.requiredZScore && c.markovProb >= ((c.config.coverage / 37) * 0.75));
 
-      // ==========================================
       // MOTOR CHARLIE: INTERSEÇÃO MULTIDIMENSIONAL
-      // ==========================================
       if (validCandidates.length >= 2 && quantumStrategy) {
-        // Pega as duas estratégias mais fortes
         validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
         const top1 = validCandidates[0];
         const top2 = validCandidates[1];
 
-        // Mapeia quais números cada estratégia defende
         const set1 = EUROPEAN_WHEEL.filter(n => top1.config.checkWin(n));
         const set2 = EUROPEAN_WHEEL.filter(n => top2.config.checkWin(n));
-        
-        // Extrai a interseção exata
         const intersectionNumbers = set1.filter(n => set2.includes(n));
 
-        // LIMITADOR DE LATÊNCIA HUMANA: Só atira se a interseção for entre 1 e 8 números para dar tempo de clicar
         if (intersectionNumbers.length > 0 && intersectionNumbers.length <= 8) {
           const targetStr = `INTERSECTION_${intersectionNumbers.join("-")}`;
-          // Aposta exata de 1 ficha mínima por número encontrado
           const exactBetAmount = session.min_chip * intersectionNumbers.length;
 
           await prisma.signal.create({ 
@@ -368,11 +365,10 @@ export class StrategyOrchestrator {
               result: "SUGGESTED" 
             } 
           });
-          return; // Aborta os sinais normais. O tiro de precisão foi acionado.
+          return; 
         }
       }
 
-      // Se o Motor Charlie não achar interseção pequena, atira a Macro normal
       if (validCandidates.length > 0) {
         validCandidates.sort((a, b) => ((a.zScore - a.markovProb) * a.strategy.bayes_weight) - ((b.zScore - b.markovProb) * b.strategy.bayes_weight));
         const topCandidate = validCandidates[0]; 
