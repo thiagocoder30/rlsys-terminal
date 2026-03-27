@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, FlaskConical, History, Activity, Lock, Unlock, Target, AlertOctagon, Download, BrainCircuit, TrendingUp, TrendingDown, Clock, ShieldAlert } from 'lucide-react';
+import { Play, FlaskConical, History, Activity, Lock, Unlock, Target, AlertOctagon, Download, BrainCircuit, TrendingUp, TrendingDown, Clock, ShieldAlert, BookOpen } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // ==========================================
@@ -35,7 +35,7 @@ const generateTacticalInsights = (sessions: any[]) => {
     insights.push({ type: 'SUCCESS', title: "Execução Sniper Confirmada", description: `Operações cirúrgicas. Você extrai lucro em média aos ${avgWinTime.toFixed(0)} minutos e liquida o caixa antes da roleta corrigir a variância.`, icon: Target, color: "text-emerald-400" });
   }
 
-  // 2. Darwinismo de Matrizes (Estratégias Letais vs Tóxicas)
+  // 2. Darwinismo de Matrizes
   const strategyStats: Record<string, { wins: number, losses: number, pnl: number }> = {};
   
   concludedSessions.forEach(s => {
@@ -46,7 +46,7 @@ const generateTacticalInsights = (sessions: any[]) => {
         if (!strategyStats[stratName]) strategyStats[stratName] = { wins: 0, losses: 0, pnl: 0 };
         if (sig.result === 'WIN') {
           strategyStats[stratName].wins++;
-          strategyStats[stratName].pnl += sig.suggested_amount; // Simplificação do PnL para a métrica
+          strategyStats[stratName].pnl += sig.suggested_amount;
         } else {
           strategyStats[stratName].losses++;
           strategyStats[stratName].pnl -= sig.suggested_amount;
@@ -60,7 +60,7 @@ const generateTacticalInsights = (sessions: any[]) => {
 
   Object.entries(strategyStats).forEach(([name, stats]) => {
     const total = stats.wins + stats.losses;
-    if (total < 3) return; // Ignora amostras pequenas
+    if (total < 3) return;
     const winRate = (stats.wins / total) * 100;
     
     if (stats.pnl > bestStrat.pnl) bestStrat = { name, winRate, pnl: stats.pnl };
@@ -68,10 +68,10 @@ const generateTacticalInsights = (sessions: any[]) => {
   });
 
   if (bestStrat.name) {
-    insights.push({ type: 'SUCCESS', title: "Matriz Alfa Identificada", description: `A estratégia [${bestStrat.name}] é sua arma mais letal, com Win Rate real de ${bestStrat.winRate.toFixed(1)}%. Mantenha confiança ao receber este sinal.`, icon: TrendingUp, color: "text-emerald-400" });
+    insights.push({ type: 'SUCCESS', title: "Matriz Alfa Identificada", description: `A estratégia [${bestStrat.name}] é sua arma mais letal, com Win Rate real de ${bestStrat.winRate.toFixed(1)}%.`, icon: TrendingUp, color: "text-emerald-400" });
   }
   if (worstStrat.name && worstStrat.pnl < 0) {
-    insights.push({ type: 'DANGER', title: "Vazamento de Capital", description: `A estratégia [${worstStrat.name}] está sangrando seu caixa (Win Rate: ${worstStrat.winRate.toFixed(1)}%). O RNG do cassino blindou esta falha. Considere ignorar sinais desta matriz.`, icon: TrendingDown, color: "text-red-400" });
+    insights.push({ type: 'DANGER', title: "Vazamento de Capital", description: `A estratégia [${worstStrat.name}] está sangrando seu caixa (Win Rate: ${worstStrat.winRate.toFixed(1)}%). Considere ignorá-la.`, icon: TrendingDown, color: "text-red-400" });
   }
 
   // 3. Taxa de Disciplina
@@ -80,7 +80,7 @@ const generateTacticalInsights = (sessions: any[]) => {
   const executionRate = totalSignals > 0 ? ((totalSignals - missedSignals) / totalSignals) * 100 : 0;
 
   if (executionRate < 60 && totalSignals > 10) {
-    insights.push({ type: 'WARNING', title: "Hesitação Tática (Delay)", description: `Você está ignorando/perdendo ${100 - executionRate.toFixed(0)}% das ordens do sistema. Isso distorce a matemática de longo prazo. Confie no motor ou pause a operação se houver delay de rede.`, icon: ShieldAlert, color: "text-yellow-400" });
+    insights.push({ type: 'WARNING', title: "Hesitação Tática (Delay)", description: `Você ignorou ${100 - executionRate.toFixed(0)}% das ordens do sistema. Confie no motor ou pause a operação se houver delay.`, icon: ShieldAlert, color: "text-yellow-400" });
   }
 
   return insights;
@@ -211,20 +211,25 @@ export const MacroDashboard: React.FC = () => {
 
       {/* BOTÕES DE AÇÃO */}
       <div className="grid grid-cols-2 gap-3">
-        <button onClick={() => navigate("/setup")} disabled={isStopLossHit} className={`flex flex-col items-center justify-center font-black uppercase tracking-widest py-6 rounded-2xl transition-all ${isStopLossHit ? 'bg-red-950/20 text-red-900/50 border border-red-900/30 cursor-not-allowed shadow-none' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]'}`}>
-          {isStopLossHit ? <Lock className="w-6 h-6 mb-2" /> : <Play className="w-6 h-6 mb-2 fill-current" />}
+        <button onClick={() => navigate("/setup")} disabled={isStopLossHit} className={`flex flex-col items-center justify-center font-black uppercase tracking-widest py-5 rounded-2xl transition-all ${isStopLossHit ? 'bg-red-950/20 text-red-900/50 border border-red-900/30 cursor-not-allowed shadow-none' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]'}`}>
+          {isStopLossHit ? <Lock className="w-5 h-5 mb-1" /> : <Play className="w-5 h-5 mb-1 fill-current" />}
           {isStopLossHit ? 'MESA TRAVADA' : 'INICIAR MESA'}
         </button>
-        <button onClick={() => navigate("/lab")} className="flex flex-col items-center justify-center bg-[#111827] border border-blue-900/50 hover:bg-slate-800 text-blue-400 font-black uppercase tracking-widest py-6 rounded-2xl shadow-lg transition-all">
-          <FlaskConical className="w-6 h-6 mb-2" /> SIMULADOR
+        <button onClick={() => navigate("/lab")} className="flex flex-col items-center justify-center bg-[#111827] border border-purple-900/50 hover:bg-slate-800 text-purple-400 font-black uppercase tracking-widest py-5 rounded-2xl shadow-lg transition-all">
+          <FlaskConical className="w-5 h-5 mb-1" /> LABORATÓRIO
         </button>
       </div>
+      
+      {/* BOTÃO DA DOUTRINA (MANUAL) */}
+      <button onClick={() => navigate("/guide")} className="w-full flex items-center justify-center gap-2 bg-[#0B101E] border border-slate-700 hover:border-slate-500 text-slate-300 font-black uppercase tracking-widest py-4 rounded-xl shadow-inner transition-all">
+        <BookOpen className="w-4 h-4 text-blue-500" /> DOUTRINA OPERACIONAL (MANUAL)
+      </button>
 
-      {/* ORÁCULO QUANTITATIVO (INTELIGÊNCIA TÁTICA) */}
+      {/* ORÁCULO QUANTITATIVO */}
       {tacticalInsights && tacticalInsights.length > 0 && (
         <div className="mt-2">
           <span className="flex items-center gap-2 text-[10px] uppercase font-black text-purple-400 tracking-widest mb-3 px-1">
-            <BrainCircuit className="w-3.5 h-3.5" /> Diagnóstico do Oráculo (A.I. Local)
+            <BrainCircuit className="w-3.5 h-3.5" /> Diagnóstico do Oráculo
           </span>
           <div className="space-y-3">
             {tacticalInsights.map((insight, idx) => {
