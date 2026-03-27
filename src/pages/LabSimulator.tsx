@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Activity, Target, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Activity, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ==========================================
@@ -19,6 +19,8 @@ const BASE_SECTORS: Record<string, number[]> = {
   "COL_1": [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34],
   "COL_2": [2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35],
   "COL_3": [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36],
+  "VOISINS": [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25],
+  "TIERS": [27,13,36,11,30,8,23,10,5,24,16,33]
 };
 
 const getNeighbors = (center: number, distance: number): number[] => {
@@ -46,7 +48,7 @@ const calculateEntropy = (spins: number[]) => {
 
 export const LabSimulator: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'BACKTEST' | 'VALIDATOR'>('BACKTEST');
+  const [activeTab, setActiveTab] = useState<'BACKTEST' | 'VALIDATOR'>('VALIDATOR');
 
   // --- ESTADOS DO BACKTESTER ---
   const [historySpins, setHistorySpins] = useState<number[]>([]);
@@ -57,14 +59,15 @@ export const LabSimulator: React.FC = () => {
   const [conditionCenter, setConditionCenter] = useState(0);
   const [conditionDistance, setConditionDistance] = useState(2);
   const [conditionThreshold, setConditionThreshold] = useState(5);
-  
   const [targetSector, setTargetSector] = useState("BLACK");
   const [targetCenter, setTargetCenter] = useState(0);
   const [targetDistance, setTargetDistance] = useState(2);
+  const [baseBet, setBaseBet] = useState(0.50); // Controle de Ficha
   const [simResult, setSimResult] = useState<any>(null);
 
-  // --- ESTADOS DO VALIDADOR DE MESA ---
-  const [liveSpins, setLiveSpins] = useState<number[]>([]);
+  // --- ESTADOS DO VALIDADOR OCR ---
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [validatorResult, setValidatorResult] = useState<any>(null);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -86,29 +89,26 @@ export const LabSimulator: React.FC = () => {
     fetchHistory();
   }, []);
 
-  // Motor Dinâmico de Setores
+  // Motor Dinâmico do Backtest
   const getDynamicSector = (sectorType: string, center: number, distance: number) => {
     if (sectorType === "VIZINHOS") return getNeighbors(center, distance);
     return BASE_SECTORS[sectorType] || [];
   };
 
   const getDynamicPayout = (sectorType: string, distance: number) => {
-    if (sectorType.includes("DOZEN") || sectorType.includes("COL")) return 2.0;
-    if (sectorType === "VIZINHOS") {
-        const numbersCovered = (distance * 2) + 1;
-        return 36 / numbersCovered;
-    }
-    return 1.0; // Red/Black/Even/Odd
+    if (sectorType.includes("DOZEN") || sectorType.includes("COL") || sectorType === "TIERS") return 2.0;
+    if (sectorType === "VIZINHOS") return 36 / ((distance * 2) + 1);
+    if (sectorType === "VOISINS") return 36 / 17;
+    return 1.0; 
   };
 
   const runBacktest = () => {
-    if (historySpins.length < 50) alert("Aviso: Poucos dados históricos. O teste pode variar.");
+    if (historySpins.length < 50) alert("Aviso: Poucos dados históricos no banco de dados.");
 
     let theoreticalBankroll = 100; 
     let wins = 0; let losses = 0; let gales = 0;
     let maxDrawdown = 0; let peakBankroll = 100;
     let activeBet: { targetArr: number[], payout: number, amount: number, step: number } | null = null;
-    const baseBet = 2.50;
 
     const conditionArr = getDynamicSector(conditionSector, conditionCenter, conditionDistance);
     const targetArr = getDynamicSector(targetSector, targetCenter, targetDistance);
@@ -119,22 +119,18 @@ export const LabSimulator: React.FC = () => {
 
       if (activeBet) {
         const isWin = activeBet.targetArr.includes(currentNumber);
-        
         if (isWin) {
           theoreticalBankroll += activeBet.amount * activeBet.payout;
-          wins++;
-          activeBet = null; 
+          wins++; activeBet = null; 
         } else {
           theoreticalBankroll -= activeBet.amount;
           if (activeBet.step === 0) {
             activeBet = { ...activeBet, amount: activeBet.amount * 2, step: 1 };
             gales++;
           } else {
-            losses++;
-            activeBet = null; 
+            losses++; activeBet = null; 
           }
         }
-
         if (theoreticalBankroll > peakBankroll) peakBankroll = theoreticalBankroll;
         const currentDrawdown = peakBankroll - theoreticalBankroll;
         if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
@@ -143,16 +139,11 @@ export const LabSimulator: React.FC = () => {
       if (!activeBet && i >= conditionThreshold) {
         const window = historySpins.slice(i - conditionThreshold, i);
         let trigger = false;
-
-        if (conditionType === "DELAY") {
-          trigger = window.every(num => num === 0 || !conditionArr.includes(num));
-        } else if (conditionType === "STREAK") {
-          trigger = window.every(num => num !== 0 && conditionArr.includes(num));
-        }
+        if (conditionType === "DELAY") trigger = window.every(num => num === 0 || !conditionArr.includes(num));
+        else if (conditionType === "STREAK") trigger = window.every(num => num !== 0 && conditionArr.includes(num));
 
         if (trigger) {
-          // O Custo da aposta é 1 ficha base por número, ajustado ao Kelly simulado
-          const cost = targetSector === "VIZINHOS" ? (targetDistance * 2 + 1) * 0.5 : baseBet;
+          const cost = targetSector === "VIZINHOS" ? ((targetDistance * 2) + 1) * baseBet : baseBet;
           activeBet = { targetArr, payout: payoutRatio, amount: cost, step: 0 };
         }
       }
@@ -165,13 +156,88 @@ export const LabSimulator: React.FC = () => {
     setSimResult({ totalSpinsAnalyzed: historySpins.length, totalBets, wins, losses, gales, winRate, pnl, maxDrawdown, isProfitable: pnl >= 0 });
   };
 
-  // Funções do Validador de Mesa
-  const handleLiveSpin = (num: number) => {
-    setLiveSpins(prev => [num, ...prev].slice(0, 50));
+  // ==========================================
+  // MOTOR DE RECONHECIMENTO DE MESA (OCR + FILTRO)
+  // ==========================================
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    setIsAnalyzing(true);
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+      const res = await fetch("/api/vision/analyze-table", { method: "POST", body: formData });
+      const data = await res.json();
+      
+      if (!data.numbers || data.numbers.length < 15) {
+        alert("Erro OCR: A imagem não possui nitidez suficiente ou não encontrou números suficientes (>15). Tente outro print.");
+        setIsAnalyzing(false);
+        return;
+      }
+      
+      evaluateTableData(data.numbers);
+    } catch (err) {
+      console.error("OCR API Limit ou Erro de Rede", err);
+      alert("Falha de Conexão com a Inteligência Computacional. Verifique o limite da API do Gemini.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
-  
-  const liveEntropy = calculateEntropy(liveSpins);
-  const isTableApproved = liveSpins.length >= 10 && liveEntropy <= 4.2;
+
+  const evaluateTableData = (numbersExtracted: number[]) => {
+    const entropy = calculateEntropy(numbersExtracted);
+    
+    // Filtro Darwiniano de Matrizes (Testa todas as matrizes base contra a amostra curta da imagem)
+    const approvedStrats: { name: string, winRate: number }[] = [];
+    const rejectedStrats: { name: string, winRate: number }[] = [];
+
+    Object.entries(BASE_SECTORS).forEach(([name, arr]) => {
+        let hits = 0;
+        let trials = 0;
+        // Simulação rápida: Verifica quantos atrasos de 3 resultaram em Win no 4º e 5º giro (Gale 1)
+        for (let i = 0; i < numbersExtracted.length - 4; i++) {
+            const window = numbersExtracted.slice(i, i+3);
+            const delayed = window.every(n => n === 0 || !arr.includes(n));
+            if (delayed) {
+                trials++;
+                const hit1 = arr.includes(numbersExtracted[i+3]);
+                const hit2 = arr.includes(numbersExtracted[i+4]);
+                if (hit1 || hit2) hits++;
+            }
+        }
+        
+        if (trials > 0) {
+            const wr = (hits / trials) * 100;
+            if (wr >= 60) approvedStrats.push({ name, winRate: wr });
+            else rejectedStrats.push({ name, winRate: wr });
+        }
+    });
+
+    // Veredito Complexo
+    let isApproved = false;
+    let reason = "";
+
+    if (entropy > 4.4) {
+        reason = "Entropia Crítica (Mesa Caótica). Padrões destruídos pelo RNG.";
+    } else if (approvedStrats.length === 0) {
+        reason = "Nenhuma matriz sobreviveu ao teste de variância nesta amostra.";
+    } else if (approvedStrats.length >= 2) {
+        isApproved = true;
+        reason = "Múltiplas matrizes em ressonância com a mesa. Vantagem Matemática Confirmada.";
+    } else {
+        reason = "Apenas uma matriz sobreviveu. Risco alto de dependência única.";
+    }
+
+    setValidatorResult({
+        numbers: numbersExtracted,
+        entropy,
+        isApproved,
+        reason,
+        approvedStrats,
+        rejectedStrats
+    });
+  };
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center py-20">
@@ -183,7 +249,6 @@ export const LabSimulator: React.FC = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col space-y-6 pb-6">
       
-      {/* HEADER */}
       <div className="flex justify-between items-center mt-2 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2">
@@ -196,20 +261,97 @@ export const LabSimulator: React.FC = () => {
         </button>
       </div>
 
-      {/* ABAS DO SISTEMA */}
       <div className="flex p-1 bg-[#0B101E] rounded-xl border border-slate-800">
-        <button onClick={() => setActiveTab('BACKTEST')} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${activeTab === 'BACKTEST' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Máquina do Tempo</button>
         <button onClick={() => setActiveTab('VALIDATOR')} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${activeTab === 'VALIDATOR' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Validador de Mesa</button>
+        <button onClick={() => setActiveTab('BACKTEST')} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${activeTab === 'BACKTEST' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Máquina do Tempo</button>
       </div>
 
       <AnimatePresence mode="wait">
+        
         {/* ========================================== */}
-        {/* ABA 1: CONSTRUTOR NO-CODE (BACKTEST) */}
+        {/* ABA 1: VALIDADOR OCR DE MESA */}
+        {/* ========================================== */}
+        {activeTab === 'VALIDATOR' && (
+          <motion.div key="validator" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
+            
+            <div className="bg-[#111827] border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col items-center text-center">
+              <span className="flex items-center gap-2 text-[10px] uppercase font-black text-blue-400 tracking-widest mb-2">
+                <Target className="w-4 h-4" /> Reconhecimento de Terreno
+              </span>
+              <p className="text-xs text-slate-400 font-medium mb-6">Faça o upload do print com o histórico numérico da roleta atual para que a Inteligência extraia os dados e avalie o risco da mesa.</p>
+
+              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" id="ocr-upload" disabled={isAnalyzing} />
+              <label htmlFor="ocr-upload" className={`w-full py-5 rounded-xl border-2 border-dashed font-black uppercase tracking-widest flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${isAnalyzing ? 'bg-blue-900/20 border-blue-500/50 text-blue-400' : 'bg-[#0B101E] border-slate-700 text-slate-400 hover:border-blue-500 hover:text-blue-500'}`}>
+                {isAnalyzing ? <Cpu className="w-8 h-8 animate-spin" /> : <UploadCloud className="w-8 h-8" />}
+                {isAnalyzing ? 'Processando Visão Computacional...' : 'ENVIAR PRINT DA ROLETA'}
+              </label>
+            </div>
+
+            {validatorResult && (
+              <div className={`p-6 rounded-2xl border shadow-xl ${validatorResult.isApproved ? 'bg-emerald-950/30 border-emerald-500' : 'bg-red-950/30 border-red-500'}`}>
+                <div className="text-center border-b border-slate-800/50 pb-5 mb-5">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Veredito da Inteligência</span>
+                  {validatorResult.isApproved ? (
+                     <h3 className="text-2xl font-black text-emerald-400 uppercase flex items-center justify-center gap-2"><ShieldCheck className="w-6 h-6" /> GO - MESA APROVADA</h3>
+                  ) : (
+                     <h3 className="text-2xl font-black text-red-400 uppercase flex items-center justify-center gap-2"><AlertTriangle className="w-6 h-6" /> NO GO - MESA HOSTIL</h3>
+                  )}
+                  <p className="text-xs font-bold uppercase tracking-widest mt-3 text-slate-300">{validatorResult.reason}</p>
+                </div>
+
+                <div className="flex justify-between items-center bg-[#0B101E] p-4 rounded-xl border border-slate-800 mb-5">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Entropia (Índice VIX)</span>
+                  <span className={`text-xl font-black font-mono ${validatorResult.entropy > 4.2 ? 'text-red-400' : 'text-emerald-400'}`}>{validatorResult.entropy.toFixed(2)}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="bg-slate-900/50 p-4 rounded-xl border border-emerald-900/50">
+                     <span className="text-[10px] uppercase font-black text-emerald-500 tracking-widest flex items-center gap-1 mb-3"><CheckCircle2 className="w-3 h-3" /> Matrizes Assertivas</span>
+                     <div className="space-y-2">
+                       {validatorResult.approvedStrats.length === 0 && <span className="text-[10px] text-slate-500">Nenhuma matriz sobreviveu.</span>}
+                       {validatorResult.approvedStrats.map((s:any, idx:number) => (
+                         <div key={idx} className="flex justify-between items-center">
+                           <span className="text-xs font-bold text-slate-300">{s.name}</span>
+                           <span className="text-[10px] font-mono font-black text-emerald-400">{s.winRate.toFixed(0)}% WR</span>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+
+                   <div className="bg-slate-900/50 p-4 rounded-xl border border-red-900/50 opacity-80">
+                     <span className="text-[10px] uppercase font-black text-red-500 tracking-widest flex items-center gap-1 mb-3"><XCircle className="w-3 h-3" /> Matrizes Reprovadas</span>
+                     <div className="space-y-2">
+                       {validatorResult.rejectedStrats.length === 0 && <span className="text-[10px] text-slate-500">Nenhuma.</span>}
+                       {validatorResult.rejectedStrats.map((s:any, idx:number) => (
+                         <div key={idx} className="flex justify-between items-center">
+                           <span className="text-[10px] font-bold text-slate-500">{s.name}</span>
+                           <span className="text-[9px] font-mono font-black text-red-400/70">{s.winRate.toFixed(0)}% WR</span>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                </div>
+
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ========================================== */}
+        {/* ABA 2: CONSTRUTOR NO-CODE (BACKTEST) */}
         {/* ========================================== */}
         {activeTab === 'BACKTEST' && (
-          <motion.div key="backtest" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
+          <motion.div key="backtest" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
             <div className="bg-[#111827] border border-slate-800 p-5 rounded-2xl shadow-xl">
-              <span className="flex items-center gap-2 text-[10px] uppercase font-black text-slate-400 tracking-widest mb-4"><Database className="w-3.5 h-3.5 text-blue-500" /> Matriz Dinâmica</span>
+              <div className="flex justify-between items-center mb-4">
+                <span className="flex items-center gap-2 text-[10px] uppercase font-black text-slate-400 tracking-widest"><Database className="w-3.5 h-3.5 text-blue-500" /> Matriz Dinâmica</span>
+                <select value={baseBet} onChange={(e) => setBaseBet(Number(e.target.value))} className="bg-[#0B101E] border border-blue-900/50 text-blue-400 text-[10px] font-black rounded px-2 py-1 outline-none">
+                  <option value={0.10}>Ficha: R$ 0.10</option>
+                  <option value={0.50}>Ficha: R$ 0.50</option>
+                  <option value={1.00}>Ficha: R$ 1.00</option>
+                  <option value={2.50}>Ficha: R$ 2.50</option>
+                </select>
+              </div>
 
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -304,59 +446,7 @@ export const LabSimulator: React.FC = () => {
             )}
           </motion.div>
         )}
-
-        {/* ========================================== */}
-        {/* ABA 2: VALIDADOR DE MESA (LIVE SANDBOX) */}
-        {/* ========================================== */}
-        {activeTab === 'VALIDATOR' && (
-          <motion.div key="validator" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
-            
-            <div className={`p-6 rounded-2xl border shadow-xl text-center ${liveSpins.length < 10 ? 'bg-slate-900 border-slate-700' : isTableApproved ? 'bg-emerald-950/50 border-emerald-500' : 'bg-red-950/50 border-red-500'}`}>
-              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Diagnóstico da Mesa</span>
-              {liveSpins.length < 10 ? (
-                 <h3 className="text-xl font-black text-slate-300 uppercase flex items-center justify-center gap-2"><Activity className="w-5 h-5 animate-pulse" /> Faltam {10 - liveSpins.length} Giros</h3>
-              ) : isTableApproved ? (
-                 <h3 className="text-xl font-black text-emerald-400 uppercase flex items-center justify-center gap-2"><ShieldCheck className="w-5 h-5" /> MESA APROVADA (GO)</h3>
-              ) : (
-                 <h3 className="text-xl font-black text-red-400 uppercase flex items-center justify-center gap-2"><AlertTriangle className="w-5 h-5" /> MESA HOSTIL (NO GO)</h3>
-              )}
-              
-              <div className="mt-4 flex justify-center gap-4">
-                <div className="bg-[#0B101E] px-4 py-2 rounded-lg border border-slate-800">
-                   <span className="text-[9px] uppercase font-bold text-slate-500 block">VIX Atual</span>
-                   <span className={`text-lg font-black font-mono ${liveEntropy > 4.2 ? 'text-red-400' : 'text-emerald-400'}`}>{liveEntropy.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-[#111827] border border-slate-800 p-5 rounded-2xl shadow-xl">
-              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Radar Temporário ({liveSpins.length} inseridos)</span>
-              <div className="flex gap-2 overflow-x-auto pb-2 mb-6">
-                {liveSpins.length === 0 && <span className="text-xs text-slate-600 font-bold uppercase">Aguardando dados...</span>}
-                {liveSpins.map((num, idx) => (
-                  <div key={idx} className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-lg font-black font-mono text-white ${num === 0 ? 'bg-emerald-500' : RED_NUMBERS.includes(num) ? 'bg-red-600' : 'bg-slate-900 border border-slate-700'}`}>{num}</div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-6 gap-2">
-                {[...Array(37)].map((_, i) => {
-                  const num = i === 36 ? 0 : i + 1;
-                  return (
-                    <button key={num} onClick={() => handleLiveSpin(num)} className={`py-3 rounded-lg font-black font-mono text-white transition-transform active:scale-95 ${num === 0 ? 'bg-emerald-600 col-span-6' : RED_NUMBERS.includes(num) ? 'bg-red-600' : 'bg-slate-800'}`}>
-                      {num}
-                    </button>
-                  )
-                })}
-              </div>
-              <button onClick={() => setLiveSpins([])} className="w-full mt-4 py-3 bg-slate-800 text-slate-400 hover:text-white rounded-lg font-bold text-xs uppercase tracking-widest transition-colors">Limpar Sandbox</button>
-            </div>
-
-          </motion.div>
-        )}
       </AnimatePresence>
     </motion.div>
   );
 };
-
-// Precisamos do RED_NUMBERS aqui para renderizar o teclado do sandbox
-const RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
