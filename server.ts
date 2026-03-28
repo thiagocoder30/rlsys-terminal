@@ -12,7 +12,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const prisma = new PrismaClient();
 const app = express();
 
-// Instancia o Multer para lidar com o File Upload em RAM (extremamente rápido)
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
@@ -62,20 +61,20 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
     const apiKey = process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
 
-    // Modelo Flash 1.5: Ideal para HFT, alta velocidade e cota massiva.
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
       generationConfig: { temperature: 0.0, responseMimeType: "application/json" }
     });
 
+    // PROMPT RECALIBRADO PARA LER A ABA "ÚLTIMOS 500" DA STAKE
     const result = await model.generateContent([
       `You are a highly precise OCR for a roulette game.
       CRITICAL INSTRUCTIONS:
-      1. IGNORE the main 0-36 betting board grid entirely.
-      2. IGNORE player balances, money values, and chat.
-      3. Look ONLY for the single horizontal row of recently drawn numbers.
-      4. Extract ONLY these recent history numbers, reading from left to right.
+      1. Analyze the provided image, which contains a history of recently drawn roulette numbers.
+      2. The numbers are displayed in a grid format (rows and columns).
+      3. Extract ALL the numbers you see in this grid. Read them row by row, from left to right, top to bottom.
+      4. Ignore text like "ÚLTIMOS 500", "QUENTE E FRIO", IDs, or balances.
       Return ONLY valid JSON: {"numbers": [int, int, ...]}`,
       {
         inlineData: {
