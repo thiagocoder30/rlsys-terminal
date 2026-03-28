@@ -44,7 +44,7 @@ export class StrategyOrchestrator {
     "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false },
     "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false },
     "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, targetBet: "MIDDLE_SIX_LINES", checkWin: () => false },
-    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 9, minChipsRequired: 9, targetBet: "SHOTGUN_STRIKE", checkWin: () => false }
+    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 18, minChipsRequired: 18, targetBet: "SHOTGUN_STRIKE_V2", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -68,33 +68,39 @@ export class StrategyOrchestrator {
     return res;
   }
 
-  // NOVA TÁTICA: OPERAÇÃO TRIDENTE (SHOTGUN STRIKE)
+  // NOVA TÁTICA: OPERAÇÃO TRIDENTE DUPLO (SHOTGUN STRIKE V2)
   public static detectOperacaoTridente(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 20) return null;
     
-    const lastNum = history[0]; // Baseia-se no último número sorteado
-    let targets: number[] = [];
+    const num1 = history[0]; // Último número sorteado
+    const num2 = history[1]; // Penúltimo número sorteado
     
-    // Tratamento de bordas lógicas da mesa
-    if (lastNum === 0) targets = [0, 1, 2];
-    else if (lastNum === 36) targets = [34, 35, 36];
-    else targets = [lastNum - 1, lastNum, lastNum + 1];
+    const getTargetsFor = (num: number) => {
+        if (num === 0) return [0, 1, 2];
+        if (num === 36) return [34, 35, 36];
+        return [num - 1, num, num + 1];
+    };
+
+    const base1 = getTargetsFor(num1);
+    const base2 = getTargetsFor(num2);
 
     const tridentNumbers = new Set<number>();
-    targets.forEach(t => {
+    [...base1, ...base2].forEach(t => {
         const neighbors = this.getNeighbors(t, 1);
         neighbors.forEach(n => tridentNumbers.add(n));
     });
     
     const tridentArr = Array.from(tridentNumbers);
 
-    // Validação de Dispersão (Anomalia do RNG)
+    // Validação de Dispersão Dinâmica
     const recent20 = history.slice(0, 20);
     let hits = 0;
     recent20.forEach(n => { if (tridentArr.includes(n)) hits++; });
 
-    // Se as micro-zonas estiverem quentes (>= 6 hits em 20 giros, acima da média), autoriza disparo
-    if (hits >= 6) {
+    // Como a área dobrou (pode ter até 18 números), calculamos a média esperada dinamicamente.
+    // E exigimos que a mesa esteja 20% mais quente que o normal nessa zona.
+    const expectedHits = 20 * (tridentArr.length / 37);
+    if (hits >= expectedHits * 1.2) {
         return { target: `TRIDENT_${tridentArr.join("-")}`, chips: tridentArr.length, payout: 36 / tridentArr.length };
     }
     return null;
@@ -327,7 +333,7 @@ export class StrategyOrchestrator {
       if (!roloStrategy) { roloStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Rolo Compressor", description: "Cerco agressivo central (Six Lines)", bayes_weight: 1.2, is_active: true } }); activeStrategies.push(roloStrategy); }
 
       let tridenteStrategy = activeStrategies.find(s => s.name === "Dynamic: Operacao Tridente");
-      if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(tridenteStrategy); }
+      if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão dupla", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(tridenteStrategy); }
 
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
@@ -392,7 +398,7 @@ export class StrategyOrchestrator {
 
       const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
       if (tridenteAnomaly !== null && tridenteStrategy) {
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 24.32, tridenteAnomaly.payout);
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 48.6, tridenteAnomaly.payout);
          await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
          return;
       }
