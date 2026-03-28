@@ -68,12 +68,11 @@ export class StrategyOrchestrator {
     return res;
   }
 
-  // NOVA TÁTICA: OPERAÇÃO TRIDENTE DUPLO (SHOTGUN STRIKE V2)
   public static detectOperacaoTridente(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 20) return null;
     
-    const num1 = history[0]; // Último número sorteado
-    const num2 = history[1]; // Penúltimo número sorteado
+    const num1 = history[0]; 
+    const num2 = history[1]; 
     
     const getTargetsFor = (num: number) => {
         if (num === 0) return [0, 1, 2];
@@ -92,13 +91,10 @@ export class StrategyOrchestrator {
     
     const tridentArr = Array.from(tridentNumbers);
 
-    // Validação de Dispersão Dinâmica
     const recent20 = history.slice(0, 20);
     let hits = 0;
     recent20.forEach(n => { if (tridentArr.includes(n)) hits++; });
 
-    // Como a área dobrou (pode ter até 18 números), calculamos a média esperada dinamicamente.
-    // E exigimos que a mesa esteja 20% mais quente que o normal nessa zona.
     const expectedHits = 20 * (tridentArr.length / 37);
     if (hits >= expectedHits * 1.2) {
         return { target: `TRIDENT_${tridentArr.join("-")}`, chips: tridentArr.length, payout: 36 / tridentArr.length };
@@ -106,7 +102,6 @@ export class StrategyOrchestrator {
     return null;
   }
 
-  // NOVA TÁTICA: ROLO COMPRESSOR
   public static detectRoloCompressor(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 15) return null;
     
@@ -118,7 +113,6 @@ export class StrategyOrchestrator {
         if(deathZone.includes(n)) deathHits++;
     }
     
-    // Se a zona da morte não apareceu NENHUMA vez (Caminho livre no centro), ataca!
     if(deathHits === 0) {
         return { target: "MIDDLE_SIX_LINES", chips: 5, payout: 1.2 };
     }
@@ -317,9 +311,6 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // ==========================================
-      // AUTO-CURA DO BANCO DE DADOS (Bootstrapping)
-      // ==========================================
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
       if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", bayes_weight: 1.0, is_active: true } }); activeStrategies.push(heatStrategy); }
       
@@ -341,7 +332,6 @@ export class StrategyOrchestrator {
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
         
         if (lastSignal && lastSignal.result === "LOSS") {
-          // Rolo Compressor não tem Gale. Tridente tem limite de 3. Sniper tem 2. Padrão 1.
           let maxGales = 1;
           if (strategy.name === "Dynamic: Rolo Compressor") maxGales = 0;
           else if (strategy.name === "Dynamic: Operacao Tridente") maxGales = 3;
@@ -378,29 +368,51 @@ export class StrategyOrchestrator {
       }
 
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
-      if (anyActive) return; // Aguarda a resolução da aposta atual
+      if (anyActive) return; 
 
-      // 2. DETECÇÃO TÁTICA SUPREMA (Anomalias Dinâmicas)
-      
-      const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
-      if (sniperAnomaly !== null && sniperStrategy) {
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
-         await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-         return;
+      // ==========================================
+      // NOVO MOTOR DE COOLDOWN (TRAVA HIT AND RUN)
+      // ==========================================
+      const isOnCooldown = (strategyId: string, winDelay: number, lossDelay: number) => {
+        const stratSignals = allSignals.filter(s => s.strategy_id === strategyId);
+        const lastSig = stratSignals.length > 0 ? stratSignals[0] : null;
+        if (!lastSig || lastSig.result === "PENDING" || lastSig.result === "SUGGESTED") return false;
+        
+        const isLoss = lastSig.result === "LOSS";
+        const required = isLoss ? lossDelay : winDelay;
+        
+        const lastSigTime = new Date(lastSig.created_at).getTime();
+        const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
+        
+        return spinsSince < required;
+      };
+
+      // 2. DETECÇÃO TÁTICA SUPREMA (Com freio tático de 3 giros na vitória e 15 na derrota)
+      if (sniperStrategy && !isOnCooldown(sniperStrategy.id, 3, 15)) {
+        const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
+        if (sniperAnomaly !== null) {
+           const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           return;
+        }
       }
 
-      const roloAnomaly = this.detectRoloCompressor(spinNumbersTimeline);
-      if (roloAnomaly !== null && roloStrategy) {
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, roloAnomaly.chips, 81.08, roloAnomaly.payout);
-         await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-         return;
+      if (roloStrategy && !isOnCooldown(roloStrategy.id, 3, 15)) {
+        const roloAnomaly = this.detectRoloCompressor(spinNumbersTimeline);
+        if (roloAnomaly !== null) {
+           const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, roloAnomaly.chips, 81.08, roloAnomaly.payout);
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           return;
+        }
       }
 
-      const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
-      if (tridenteAnomaly !== null && tridenteStrategy) {
-         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 48.6, tridenteAnomaly.payout);
-         await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
-         return;
+      if (tridenteStrategy && !isOnCooldown(tridenteStrategy.id, 3, 15)) {
+        const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
+        if (tridenteAnomaly !== null) {
+           const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 48.6, tridenteAnomaly.payout);
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           return;
+        }
       }
 
       // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO (Legado)
@@ -425,14 +437,14 @@ export class StrategyOrchestrator {
         const requiredCooldown = isPenalized ? 25 : 3; 
         const requiredZScore = isPenalized ? -1.50 : -0.85; 
 
-        let isOnCooldown = false;
+        let isOnCooldownStandard = false;
         if (lastSignal && lastSignal.result !== "PENDING" && lastSignal.result !== "SUGGESTED") {
           const lastSigTime = new Date(lastSignal.created_at).getTime();
           const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
-          if (spinsSince < requiredCooldown) isOnCooldown = true;
+          if (spinsSince < requiredCooldown) isOnCooldownStandard = true;
         }
 
-        if (isOnCooldown) continue; 
+        if (isOnCooldownStandard) continue; 
         if (config.canTrigger && !config.canTrigger(spinNumbersTimeline)) continue;
         
         const zScore = this.calculateSectorZScore(spinNumbersTimeline, config);
