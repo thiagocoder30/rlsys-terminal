@@ -64,7 +64,7 @@ export const LabSimulator: React.FC = () => {
   const [baseBet, setBaseBet] = useState(0.50);
   const [simResult, setSimResult] = useState<any>(null);
 
-  // --- ESTADOS DO VALIDADOR OCR (DRONE) ---
+  // --- ESTADOS DO VALIDADOR OCR ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [validatorResult, setValidatorResult] = useState<any>(null);
 
@@ -249,7 +249,7 @@ export const LabSimulator: React.FC = () => {
       const bankroll = parseFloat(rawBankroll.replace(",", "."));
       const chip = parseFloat(rawChip.replace(",", "."));
 
-      await fetch("/api/sessions/warm-start", {
+      const response = await fetch("/api/sessions/warm-start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -258,11 +258,17 @@ export const LabSimulator: React.FC = () => {
           numbers: validatorResult.numbers 
         })
       });
+
+      if (!response.ok) {
+        throw new Error("Falha na comunicação com a Base HFT");
+      }
       
-      // Teletransporte para o painel de guerra com a IA já carregada
-      navigate("/");
+      // FORÇA BRUTA: Desmonta o laboratório e recarrega a página raiz do zero
+      // Isso obriga o Painel Central a buscar a nova sessão ativa instantaneamente
+      window.location.href = "/";
     } catch (e) {
-      alert("Erro ao injetar a mesa no Cérebro. Verifique o servidor.");
+      alert("Erro ao injetar a mesa no Cérebro. Verifique se o server.ts possui a rota warm-start.");
+      console.error(e);
     }
   };
 
@@ -294,7 +300,6 @@ export const LabSimulator: React.FC = () => {
       </div>
 
       <AnimatePresence mode="wait">
-        {/* ABA 1: VALIDADOR OCR */}
         {activeTab === 'VALIDATOR' && (
           <motion.div key="validator" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
             
@@ -365,7 +370,6 @@ export const LabSimulator: React.FC = () => {
           </motion.div>
         )}
 
-        {/* ABA 2: BACKTEST */}
         {activeTab === 'BACKTEST' && (
           <motion.div key="backtest" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
             <div className="bg-[#111827] border border-slate-800 p-5 rounded-2xl shadow-xl">
