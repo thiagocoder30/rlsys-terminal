@@ -236,40 +236,12 @@ export const LabSimulator: React.FC = () => {
   // ==========================================
   // INJEÇÃO DIRETA (AÇÃO DO NOVO BOTÃO)
   // ==========================================
-  const injectAndEngage = async () => {
+  const injectAndEngage = () => {
     if (!validatorResult || !validatorResult.numbers) return;
     
-    const rawBankroll = prompt("INICIAR OPERAÇÃO TÁTICA\n\nQual a sua banca inicial disponível na Stake? (Ex: 20.00)", "20.00");
-    if (!rawBankroll) return;
-    
-    const rawChip = prompt("Qual o valor da ficha que o HFT deve usar? (Ex: 0.10 ou 0.50)", "0.10");
-    if (!rawChip) return;
-
-    try {
-      const bankroll = parseFloat(rawBankroll.replace(",", "."));
-      const chip = parseFloat(rawChip.replace(",", "."));
-
-      const response = await fetch("/api/sessions/warm-start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          initial_bankroll: bankroll,
-          min_chip: chip,
-          numbers: validatorResult.numbers 
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error("Falha na comunicação com a Base HFT");
-      }
-      
-      // FORÇA BRUTA: Desmonta o laboratório e recarrega a página raiz do zero
-      // Isso obriga o Painel Central a buscar a nova sessão ativa instantaneamente
-      window.location.href = "/";
-    } catch (e) {
-      alert("Erro ao injetar a mesa no Cérebro. Verifique se o server.ts possui a rota warm-start.");
-      console.error(e);
-    }
+    // Teletransporte tático para a tela de Setup
+    // Enviamos a matriz de números escondida na propriedade "state" da navegação
+    navigate("/setup", { state: { injectedNumbers: validatorResult.numbers } });
   };
 
   if (loading) return (
@@ -324,7 +296,7 @@ export const LabSimulator: React.FC = () => {
                      <div>
                        <h3 className="text-2xl font-black text-emerald-400 uppercase flex items-center justify-center gap-2"><ShieldCheck className="w-6 h-6" /> GO - MESA APROVADA</h3>
                        <button onClick={injectAndEngage} className="mt-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/50 hover:scale-[1.02]">
-                         <Zap className="w-5 h-5 fill-current" /> INJETAR MESA E OPERAR
+                         <Zap className="w-5 h-5 fill-current" /> IR PARA SETUP DA MESA
                        </button>
                      </div>
                   ) : (
