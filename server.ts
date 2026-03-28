@@ -62,12 +62,14 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
     if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
 
     const genAI = new GoogleGenerativeAI(apiKey);
+    
+    // MODELO CORRIGIDO PARA A SUA INFRAESTRUTURA (GEMINI 3 FLASH)
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: { temperature: 0.0, responseMimeType: "application/json" }
+      model: "gemini-3-flash-preview",
+      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" }
     });
 
-    // PROMPT RECALIBRADO PARA LER A ABA "ÚLTIMOS 500" DA STAKE
+    // PROMPT PARA LER A GRADE DE "ÚLTIMOS 500"
     const result = await model.generateContent([
       `You are a highly precise OCR for a roulette game.
       CRITICAL INSTRUCTIONS:
