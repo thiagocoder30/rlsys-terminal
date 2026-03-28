@@ -1,289 +1,57 @@
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import path from "path";
-import { PrismaClient } from "@prisma/client";
-import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
-import { SimulationEngine } from "./src/services/SimulationEngine";
-import { syncStrategiesToDatabase } from "./src/services/StrategyBootstrapper";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { exec } from "child_process";
-import util from "util";
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import path from 'path';
 
-const execPromise = util.promisify(exec);
-const prisma = new PrismaClient();
+// Importação das rotas
+import visionRoutes from './routes/vision';
+
+// Carrega as variáveis de ambiente (.env)
+dotenv.config();
+
 const app = express();
+const PORT = process.env.PORT || 3001; // Backend rodando na porta 3001
 
+// Middlewares de Segurança e Parse
 app.use(cors());
-app.use(express.json({ limit: "50mb" })); 
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ==========================================
-// FUNÇÕES TÁTICAS: O PINTOR ALGORÍTMICO COMPLETO
+// REGISTRO DE ROTAS DO TERMINAL
 // ==========================================
-function getNumberColor(num: number): string {
-  if (num === 0) return "GREEN";
-  const reds = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
-  return reds.includes(num) ? "RED" : "BLACK";
-}
 
-function getNumberParity(num: number): string {
-  if (num === 0) return "ZERO";
-  return num % 2 === 0 ? "EVEN" : "ODD";
-}
+// Rota do Drone OCR (Hawk-Eye)
+app.use('/api/vision', visionRoutes);
 
-function getNumberDozen(num: number): string {
-  if (num === 0) return "ZERO";
-  if (num <= 12) return "1";
-  if (num <= 24) return "2";
-  return "3";
-}
-
-function getNumberColumn(num: number): string {
-  if (num === 0) return "ZERO";
-  if (num % 3 === 1) return "1";
-  if (num % 3 === 2) return "2";
-  return "3";
-}
-
-function getNumberHalf(num: number): string {
-  if (num === 0) return "ZERO";
-  return num <= 18 ? "1" : "2"; 
-}
-
-// ==========================================
-// ROTA DO RADAR AUTÔNOMO (COM FOCO ESTRITO)
-// ==========================================
-app.get("/api/radar/scan", async (req, res) => {
-  try {
-    await execPromise("adb connect localhost:5555").catch(() => {});
-
-    console.log("[HAWK-EYE] Disparando captura de tela via ADB...");
-    
-    const { stdout } = await execPromise("adb exec-out screencap -p", { encoding: "buffer", maxBuffer: 1024 * 1024 * 50 });
-    const base64Image = stdout.toString("base64");
-    
-    console.log("[HAWK-EYE] Captura bem-sucedida. Enviando para IA...");
-
-    const apiKey = process.env.VITE_GEMINI_API_KEY; 
-    if (!apiKey) throw new Error("Chave da API ausente.");
-
-    const genAI = new GoogleGenerativeAI(apiKey); 
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-3-flash-preview", 
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } 
-    });
-    
-    // NOVO PROMPT APLICADO AQUI (Ignora lixo visual da mesa)
-    const result = await model.generateContent([
-      `You are a highly precise OCR for a roulette game. 
-      CRITICAL INSTRUCTIONS: 
-      1. IGNORE the main 0-36 betting board grid entirely.
-      2. IGNORE player balances, money values, and chat.
-      3. Look ONLY for the single horizontal row of recently drawn numbers (usually displayed inside small red, black, or green pill shapes).
-      4. Extract ONLY these recent history numbers, reading from left to right.
-      Return ONLY valid JSON: {"numbers": [int, int, ...]}`, 
-      { inlineData: { data: base64Image, mimeType: "image/png" } }
-    ]);
-    
-    let rawText = result.response.text();
-    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    
-    const jsonObj = JSON.parse(rawText);
-    const numbers = [...(jsonObj.numbers || [])].reverse(); 
-    
-    if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA na captura ADB.");
-    
-    console.log(`[HAWK-EYE] IA retornou ${numbers.length} números.`);
-    res.json({ numbers });
-  } catch (error: any) { 
-    console.error("[HAWK-EYE ERROR]:", error.message);
-    res.status(500).json({ error: error.message }); 
-  }
+// Mock de segurança para avisar se rotas antigas estiverem faltando
+app.use('/api/macro', (req, res, next) => {
+    // Se você tiver um macroRoutes.ts, substitua este bloco por: app.use('/api/macro', macroRoutes);
+    console.warn("Aviso: Rota /api/macro interceptada pelo fallback do server.ts");
+    next();
 });
 
 // ==========================================
-// ROTA MANUAL DE OCR (LEGADO ATUALIZADO)
+// SERVIÇO DE ARQUIVOS ESTÁTICOS (FRONT-END)
 // ==========================================
-app.post("/api/ocr", async (req, res) => {
-  try {
-    const { imageBase64 } = req.body;
-    if (!imageBase64) throw new Error("Imagem não fornecida ao servidor.");
+// Serve o front-end compilado pelo Vite
+app.use(express.static(path.join(__dirname, '../dist')));
 
-    const apiKey = process.env.VITE_GEMINI_API_KEY; 
-    if (!apiKey) throw new Error("Chave da API ausente.");
-
-    const genAI = new GoogleGenerativeAI(apiKey); 
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-3-flash-preview", 
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" } 
-    });
-    
-    const result = await model.generateContent([
-      `You are a highly precise OCR for a roulette game. 
-      CRITICAL INSTRUCTIONS: 
-      1. IGNORE the main 0-36 betting board grid entirely.
-      2. IGNORE player balances, money values, and chat.
-      3. Look ONLY for the single horizontal row of recently drawn numbers (usually displayed inside small red, black, or green pill shapes).
-      4. Extract ONLY these recent history numbers, reading from left to right.
-      Return ONLY valid JSON: {"numbers": [int, int, ...]}`, 
-      { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
-    ]);
-    
-    let rawText = result.response.text();
-    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    
-    const jsonObj = JSON.parse(rawText);
-    const numbers = [...(jsonObj.numbers || [])].reverse(); 
-    if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA.");
-    
-    res.json({ numbers });
-  } catch (error: any) { 
-    res.status(500).json({ error: error.message }); 
-  }
-});
-
-// ==========================================
-// ROTAS DO HFT E WARM-START
-// ==========================================
-app.get("/api/macro", async (req, res) => {
-  try {
-    const sessions = await prisma.session.findMany({ where: { status: "CLOSED" }, orderBy: { created_at: "desc" } });
-    let totalProfit = 0; sessions.forEach(s => { totalProfit += (s.current_bankroll - s.initial_bankroll); });
-    res.json({ totalProfit, totalSessions: sessions.length, sessions });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/simulate", async (req, res) => {
-  try {
-    const { numbers, initial_bankroll, min_chip } = req.body;
-    if (!numbers || numbers.length === 0) throw new Error("Nenhum giro fornecido.");
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-    const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-    const report = await SimulationEngine.runBacktest(safeNumbers, initial_bankroll, min_chip, activeStrategies);
-    res.json(report);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/warm-start", async (req, res) => {
-  try {
-    const { initial_bankroll, min_chip, numbers } = req.body;
-    const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-
-    for (const num of safeNumbers) {
-      await prisma.spin.create({
-        data: { session_id: session.id, number: num, color: getNumberColor(num), parity: getNumberParity(num), dozen: getNumberDozen(num), column: getNumberColumn(num), half: getNumberHalf(num) }
-      });
+// Redireciona qualquer rota não reconhecida na API para o React Router lidar no Front-end
+app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+        res.sendFile(path.join(__dirname, '../dist/index.html'));
+    } else {
+        res.status(404).json({ error: "Comandante, Rota de API não encontrada no servidor." });
     }
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions", async (req, res) => {
-  try {
-    const { initial_bankroll, min_chip } = req.body;
-    const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.get("/api/sessions/:id/dashboard", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const session = await prisma.session.findUnique({ where: { id }, include: { spins: { orderBy: { created_at: "desc" } }, signals: { include: { strategy: true }, orderBy: { created_at: "desc" } } } });
-    if (!session) return res.status(404).json({ error: "Not found" });
-    res.json({ session, zScore: 0, strategiesStatus: [] });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/close", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const session = await prisma.session.update({ where: { id }, data: { status: "CLOSED", closed_at: new Date() } });
-    await prisma.signal.updateMany({ where: { session_id: id, result: { in: ["PENDING", "SUGGESTED"] } }, data: { result: "MISSED" } });
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.get("/api/sessions/:id/audit", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const auditData = await prisma.session.findUnique({ where: { id }, include: { spins: { orderBy: { created_at: "desc" } }, signals: { include: { strategy: true }, orderBy: { created_at: "desc" } } } });
-    res.json(auditData);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/spins", async (req, res) => {
-  try {
-    const { id } = req.params; const { number } = req.body;
-    await StrategyOrchestrator.resolvePendingSignals(number, id);
-    const spin = await prisma.spin.create({ data: { session_id: id, number, color: getNumberColor(number), parity: getNumberParity(number), dozen: getNumberDozen(number), column: getNumberColumn(number), half: getNumberHalf(number) } });
-    const session = await prisma.session.findUnique({ where: { id } });
-    if (session) {
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-      await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
-    }
-    res.json(spin);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
-  try {
-    const { id } = req.params; const { numbers } = req.body;
-    const session = await prisma.session.findUnique({ where: { id } });
-    if (!session) throw new Error("Sessão não existe.");
-    const dbSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 10 });
-    const dbNumbers = dbSpins.map(s => s.number);
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-    let newNumbers: number[] = [];
-    if (dbNumbers.length === 0) { newNumbers = safeNumbers; } 
-    else {
-      let matchIndex = -1;
-      for (let i = 0; i < safeNumbers.length; i++) {
-         let isMatch = true;
-         for (let j = 0; j < Math.min(3, dbNumbers.length); j++) {
-            if (safeNumbers[i + j] !== dbNumbers[j]) { isMatch = false; break; }
-         }
-         if (isMatch) { matchIndex = i; break; }
-      }
-      if (matchIndex === -1) { newNumbers = safeNumbers.length > 0 ? [safeNumbers[0]] : []; } 
-      else { newNumbers = safeNumbers.slice(0, matchIndex); }
-    }
-    const toInsert = [...newNumbers].reverse();
-    for (const num of toInsert) {
-      await StrategyOrchestrator.resolvePendingSignals(num, id);
-      await prisma.spin.create({ data: { session_id: id, number: num, color: getNumberColor(num), parity: getNumberParity(num), dozen: getNumberDozen(num), column: getNumberColumn(num), half: getNumberHalf(num) } });
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-      await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
-    }
-    res.json({ message: "Success", added: toInsert.length });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/signals/:id/action", async (req, res) => {
-  try {
-    const { id } = req.params; const { action } = req.body;
-    if (action === "CONFIRM") await prisma.signal.update({ where: { id }, data: { result: "PENDING" } });
-    else if (action === "REJECT") await prisma.signal.update({ where: { id }, data: { result: "MISSED" } });
-    res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 // ==========================================
-// ROTEAMENTO DE PRODUÇÃO PADRÃO
+// INICIALIZAÇÃO DO MOTOR
 // ==========================================
-app.use(express.static(path.join(process.cwd(), "dist")));
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "dist", "index.html"));
+app.listen(PORT, () => {
+    console.log(`[RL.SYS HFT] Motor Backend de Alta Frequência operando na porta ${PORT}`);
+    console.log(`[RL.SYS HFT] Módulo Hawk-Eye (Visão Computacional) -> ONLINE`);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`\n[RL.SYS HFT] Servidor Operacional Iniciado.`);
-  console.log(`[NETWORK] Roteamento ativo na porta: ${PORT}`);
-  await syncStrategiesToDatabase(prisma);
-  console.log(`[BOOTSTRAP] Rede Neural Carregada com Sucesso.\n`);
-});
+export default app;
