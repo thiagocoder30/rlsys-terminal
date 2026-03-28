@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ==========================================
@@ -53,7 +53,6 @@ export const LabSimulator: React.FC = () => {
   // --- ESTADOS DO BACKTESTER ---
   const [historySpins, setHistorySpins] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stratName, setStratName] = useState("Alpha Sniper");
   const [conditionType, setConditionType] = useState("DELAY");
   const [conditionSector, setConditionSector] = useState("RED");
   const [conditionCenter, setConditionCenter] = useState(0);
@@ -89,7 +88,6 @@ export const LabSimulator: React.FC = () => {
     fetchHistory();
   }, []);
 
-  // Motor Dinâmico do Backtest
   const getDynamicSector = (sectorType: string, center: number, distance: number) => {
     if (sectorType === "VIZINHOS") return getNeighbors(center, distance);
     return BASE_SECTORS[sectorType] || [];
@@ -171,7 +169,7 @@ export const LabSimulator: React.FC = () => {
       const data = await res.json();
       
       if (!data.numbers || data.numbers.length < 5) {
-        alert("Erro OCR: A IA não conseguiu extrair números suficientes da imagem. Certifique-se de printar o histórico da roleta.");
+        alert("Erro OCR: A IA não conseguiu extrair números suficientes da imagem.");
         setIsAnalyzing(false);
         return;
       }
@@ -179,7 +177,7 @@ export const LabSimulator: React.FC = () => {
       evaluateTableData(data.numbers);
     } catch (err) {
       console.error("Erro na API do OCR", err);
-      alert("Falha de Conexão com o Servidor de Visão. Verifique os logs do backend.");
+      alert("Falha de Conexão com o Servidor de Visão.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -188,7 +186,6 @@ export const LabSimulator: React.FC = () => {
   const evaluateTableData = (numbersExtracted: number[]) => {
     const entropy = calculateEntropy(numbersExtracted);
     
-    // Filtro Darwiniano
     const approvedStrats: { name: string, winRate: number }[] = [];
     const rejectedStrats: { name: string, winRate: number }[] = [];
 
@@ -200,7 +197,7 @@ export const LabSimulator: React.FC = () => {
             if (delayed) {
                 trials++;
                 const hit1 = arr.includes(numbersExtracted[i+3]);
-                const hit2 = arr.includes(numbersExtracted[i+4]); // Com 1 Gale
+                const hit2 = arr.includes(numbersExtracted[i+4]);
                 if (hit1 || hit2) hits++;
             }
         }
@@ -236,6 +233,39 @@ export const LabSimulator: React.FC = () => {
     });
   };
 
+  // ==========================================
+  // INJEÇÃO DIRETA (AÇÃO DO NOVO BOTÃO)
+  // ==========================================
+  const injectAndEngage = async () => {
+    if (!validatorResult || !validatorResult.numbers) return;
+    
+    const rawBankroll = prompt("INICIAR OPERAÇÃO TÁTICA\n\nQual a sua banca inicial disponível na Stake? (Ex: 20.00)", "20.00");
+    if (!rawBankroll) return;
+    
+    const rawChip = prompt("Qual o valor da ficha que o HFT deve usar? (Ex: 0.10 ou 0.50)", "0.10");
+    if (!rawChip) return;
+
+    try {
+      const bankroll = parseFloat(rawBankroll.replace(",", "."));
+      const chip = parseFloat(rawChip.replace(",", "."));
+
+      await fetch("/api/sessions/warm-start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initial_bankroll: bankroll,
+          min_chip: chip,
+          numbers: validatorResult.numbers 
+        })
+      });
+      
+      // Teletransporte para o painel de guerra com a IA já carregada
+      navigate("/");
+    } catch (e) {
+      alert("Erro ao injetar a mesa no Cérebro. Verifique o servidor.");
+    }
+  };
+
   if (loading) return (
     <div className="flex flex-col items-center justify-center py-20">
       <FlaskConical className="w-10 h-10 text-purple-500 animate-pulse mb-4" />
@@ -264,10 +294,7 @@ export const LabSimulator: React.FC = () => {
       </div>
 
       <AnimatePresence mode="wait">
-        
-        {/* ========================================== */}
-        {/* ABA 1: VALIDADOR OCR DE MESA (O DRONE) */}
-        {/* ========================================== */}
+        {/* ABA 1: VALIDADOR OCR */}
         {activeTab === 'VALIDATOR' && (
           <motion.div key="validator" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
             
@@ -275,7 +302,7 @@ export const LabSimulator: React.FC = () => {
               <span className="flex items-center gap-2 text-[10px] uppercase font-black text-blue-400 tracking-widest mb-2">
                 <Target className="w-4 h-4" /> Reconhecimento de Terreno
               </span>
-              <p className="text-xs text-slate-400 font-medium mb-6">Faça o upload do print com o histórico da roleta para a IA avaliar o risco da mesa instantaneamente (Consumo Flash On-Demand).</p>
+              <p className="text-xs text-slate-400 font-medium mb-6">Faça o upload do print com o histórico da roleta para a IA avaliar o risco da mesa instantaneamente.</p>
 
               <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" id="ocr-upload" disabled={isAnalyzing} />
               <label htmlFor="ocr-upload" className={`w-full py-6 rounded-xl border-2 border-dashed font-black uppercase tracking-widest flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${isAnalyzing ? 'bg-blue-900/20 border-blue-500/50 text-blue-400' : 'bg-[#0B101E] border-slate-700 text-slate-400 hover:border-blue-500 hover:text-blue-500'}`}>
@@ -289,11 +316,16 @@ export const LabSimulator: React.FC = () => {
                 <div className="text-center border-b border-slate-800/50 pb-5 mb-5">
                   <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Veredito da Inteligência</span>
                   {validatorResult.isApproved ? (
-                     <h3 className="text-2xl font-black text-emerald-400 uppercase flex items-center justify-center gap-2"><ShieldCheck className="w-6 h-6" /> GO - MESA APROVADA</h3>
+                     <div>
+                       <h3 className="text-2xl font-black text-emerald-400 uppercase flex items-center justify-center gap-2"><ShieldCheck className="w-6 h-6" /> GO - MESA APROVADA</h3>
+                       <button onClick={injectAndEngage} className="mt-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/50 hover:scale-[1.02]">
+                         <Zap className="w-5 h-5 fill-current" /> INJETAR MESA E OPERAR
+                       </button>
+                     </div>
                   ) : (
                      <h3 className="text-2xl font-black text-red-400 uppercase flex items-center justify-center gap-2"><AlertTriangle className="w-6 h-6" /> NO GO - MESA HOSTIL</h3>
                   )}
-                  <p className="text-xs font-bold uppercase tracking-widest mt-3 text-slate-300">{validatorResult.reason}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest mt-4 text-slate-300">{validatorResult.reason}</p>
                 </div>
 
                 <div className="flex justify-between items-center bg-[#0B101E] p-4 rounded-xl border border-slate-800 mb-5">
@@ -333,9 +365,7 @@ export const LabSimulator: React.FC = () => {
           </motion.div>
         )}
 
-        {/* ========================================== */}
-        {/* ABA 2: CONSTRUTOR NO-CODE (BACKTEST) */}
-        {/* ========================================== */}
+        {/* ABA 2: BACKTEST */}
         {activeTab === 'BACKTEST' && (
           <motion.div key="backtest" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
             <div className="bg-[#111827] border border-slate-800 p-5 rounded-2xl shadow-xl">
