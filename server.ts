@@ -8,14 +8,11 @@ import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
 import { SimulationEngine } from "./src/services/SimulationEngine";
 import { syncStrategiesToDatabase } from "./src/services/StrategyBootstrapper";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { exec } from "child_process";
-import util from "util";
 
-const execPromise = util.promisify(exec);
 const prisma = new PrismaClient();
 const app = express();
 
-// Configuração do Multer para receber a imagem da nova tela do Laboratório em RAM
+// Instancia o Multer para lidar com o File Upload em RAM (extremamente rápido)
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
@@ -56,16 +53,16 @@ function getNumberHalf(num: number): string {
 }
 
 // ==========================================
-// NOVA ROTA: VALIDADOR OCR DO LABORATÓRIO (UPLOAD MULTIPART)
+// A NOVA ROTA: HAWK-EYE OCR ON-DEMAND (LABORATÓRIO)
 // ==========================================
 app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) throw new Error("Comandante, nenhuma imagem foi detectada no envio.");
+    if (!req.file) throw new Error("Comandante, o arquivo de imagem não chegou ao servidor.");
 
     const apiKey = process.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Chave da API ausente no .env.");
+    if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
 
-    // Utilizamos o modelo mais rápido e barato para visão
+    // Modelo Flash 1.5: Ideal para HFT, alta velocidade e cota massiva.
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
@@ -77,7 +74,7 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
       CRITICAL INSTRUCTIONS:
       1. IGNORE the main 0-36 betting board grid entirely.
       2. IGNORE player balances, money values, and chat.
-      3. Look ONLY for the single horizontal row of recently drawn numbers (usually displayed inside small red, black, or green pill shapes).
+      3. Look ONLY for the single horizontal row of recently drawn numbers.
       4. Extract ONLY these recent history numbers, reading from left to right.
       Return ONLY valid JSON: {"numbers": [int, int, ...]}`,
       {
@@ -94,92 +91,11 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
     const jsonObj = JSON.parse(rawText);
     const numbers = [...(jsonObj.numbers || [])];
 
-    if (numbers.length === 0) throw new Error("A Visão Computacional não encontrou números na imagem.");
-
-    res.json({ numbers });
-  } catch (error: any) {
-    console.error("[NOVO HAWK-EYE ERROR]:", error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==========================================
-// ROTA DO RADAR AUTÔNOMO (COM FOCO ESTRITO) - LEGADO
-// ==========================================
-app.get("/api/radar/scan", async (req, res) => {
-  try {
-    await execPromise("adb connect localhost:5555").catch(() => {});
-    console.log("[HAWK-EYE] Disparando captura de tela via ADB...");
-
-    const { stdout } = await execPromise("adb exec-out screencap -p", { encoding: "buffer", maxBuffer: 1024 * 1024 * 50 });
-    const base64Image = stdout.toString("base64");
-
-    const apiKey = process.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Chave da API ausente.");
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" }
-    });
-
-    const result = await model.generateContent([
-      `You are a highly precise OCR for a roulette game.
-      CRITICAL INSTRUCTIONS:
-      1. IGNORE the main 0-36 betting board grid entirely.
-      2. IGNORE player balances, money values, and chat.
-      3. Look ONLY for the single horizontal row of recently drawn numbers.
-      4. Extract ONLY these recent history numbers, reading from left to right.
-      Return ONLY valid JSON: {"numbers": [int, int, ...]}`,
-      { inlineData: { data: base64Image, mimeType: "image/png" } }
-    ]);
-
-    let rawText = result.response.text();
-    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-
-    const jsonObj = JSON.parse(rawText);
-    const numbers = [...(jsonObj.numbers || [])].reverse();
-
-    if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA na captura ADB.");
+    if (numbers.length === 0) throw new Error("A Inteligência não extraiu números do print enviado.");
 
     res.json({ numbers });
   } catch (error: any) {
     console.error("[HAWK-EYE ERROR]:", error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==========================================
-// ROTA MANUAL DE OCR (LEGADO ATUALIZADO)
-// ==========================================
-app.post("/api/ocr", async (req, res) => {
-  try {
-    const { imageBase64 } = req.body;
-    if (!imageBase64) throw new Error("Imagem não fornecida ao servidor.");
-
-    const apiKey = process.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Chave da API ausente.");
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" }
-    });
-
-    const result = await model.generateContent([
-      `You are a highly precise OCR for a roulette game. Return ONLY valid JSON: {"numbers": [int, int, ...]}`,
-      { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }
-    ]);
-
-    let rawText = result.response.text();
-    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-
-    const jsonObj = JSON.parse(rawText);
-    const numbers = [...(jsonObj.numbers || [])].reverse();
-    if (numbers.length === 0) throw new Error("Nenhum número detectado pela IA.");
-
-    res.json({ numbers });
-  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -267,40 +183,6 @@ app.post("/api/sessions/:id/spins", async (req, res) => {
       await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
     }
     res.json(spin);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/ocr/sync", async (req, res) => {
-  try {
-    const { id } = req.params; const { numbers } = req.body;
-    const session = await prisma.session.findUnique({ where: { id } });
-    if (!session) throw new Error("Sessão não existe.");
-    const dbSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" }, take: 10 });
-    const dbNumbers = dbSpins.map(s => s.number);
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-    let newNumbers: number[] = [];
-    if (dbNumbers.length === 0) { newNumbers = safeNumbers; }
-    else {
-      let matchIndex = -1;
-      for (let i = 0; i < safeNumbers.length; i++) {
-         let isMatch = true;
-         for (let j = 0; j < Math.min(3, dbNumbers.length); j++) {
-            if (safeNumbers[i + j] !== dbNumbers[j]) { isMatch = false; break; }
-         }
-         if (isMatch) { matchIndex = i; break; }
-      }
-      if (matchIndex === -1) { newNumbers = safeNumbers.length > 0 ? [safeNumbers[0]] : []; }
-      else { newNumbers = safeNumbers.slice(0, matchIndex); }
-    }
-    const toInsert = [...newNumbers].reverse();
-    for (const num of toInsert) {
-      await StrategyOrchestrator.resolvePendingSignals(num, id);
-      await prisma.spin.create({ data: { session_id: id, number: num, color: getNumberColor(num), parity: getNumberParity(num), dozen: getNumberDozen(num), column: getNumberColumn(num), half: getNumberHalf(num) } });
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-      await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
-    }
-    res.json({ message: "Success", added: toInsert.length });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
