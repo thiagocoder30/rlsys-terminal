@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Activity, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ==========================================
@@ -48,7 +48,7 @@ const calculateEntropy = (spins: number[]) => {
 
 export const LabSimulator: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'BACKTEST' | 'VALIDATOR'>('VALIDATOR');
+  const [activeTab, setActiveTab] = useState<'VALIDATOR' | 'BACKTEST'>('VALIDATOR');
 
   // --- ESTADOS DO BACKTESTER ---
   const [historySpins, setHistorySpins] = useState<number[]>([]);
@@ -62,10 +62,10 @@ export const LabSimulator: React.FC = () => {
   const [targetSector, setTargetSector] = useState("BLACK");
   const [targetCenter, setTargetCenter] = useState(0);
   const [targetDistance, setTargetDistance] = useState(2);
-  const [baseBet, setBaseBet] = useState(0.50); // Controle de Ficha
+  const [baseBet, setBaseBet] = useState(0.50);
   const [simResult, setSimResult] = useState<any>(null);
 
-  // --- ESTADOS DO VALIDADOR OCR ---
+  // --- ESTADOS DO VALIDADOR OCR (DRONE) ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [validatorResult, setValidatorResult] = useState<any>(null);
 
@@ -170,16 +170,16 @@ export const LabSimulator: React.FC = () => {
       const res = await fetch("/api/vision/analyze-table", { method: "POST", body: formData });
       const data = await res.json();
       
-      if (!data.numbers || data.numbers.length < 15) {
-        alert("Erro OCR: A imagem não possui nitidez suficiente ou não encontrou números suficientes (>15). Tente outro print.");
+      if (!data.numbers || data.numbers.length < 5) {
+        alert("Erro OCR: A IA não conseguiu extrair números suficientes da imagem. Certifique-se de printar o histórico da roleta.");
         setIsAnalyzing(false);
         return;
       }
       
       evaluateTableData(data.numbers);
     } catch (err) {
-      console.error("OCR API Limit ou Erro de Rede", err);
-      alert("Falha de Conexão com a Inteligência Computacional. Verifique o limite da API do Gemini.");
+      console.error("Erro na API do OCR", err);
+      alert("Falha de Conexão com o Servidor de Visão. Verifique os logs do backend.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -188,21 +188,19 @@ export const LabSimulator: React.FC = () => {
   const evaluateTableData = (numbersExtracted: number[]) => {
     const entropy = calculateEntropy(numbersExtracted);
     
-    // Filtro Darwiniano de Matrizes (Testa todas as matrizes base contra a amostra curta da imagem)
+    // Filtro Darwiniano
     const approvedStrats: { name: string, winRate: number }[] = [];
     const rejectedStrats: { name: string, winRate: number }[] = [];
 
     Object.entries(BASE_SECTORS).forEach(([name, arr]) => {
-        let hits = 0;
-        let trials = 0;
-        // Simulação rápida: Verifica quantos atrasos de 3 resultaram em Win no 4º e 5º giro (Gale 1)
+        let hits = 0; let trials = 0;
         for (let i = 0; i < numbersExtracted.length - 4; i++) {
             const window = numbersExtracted.slice(i, i+3);
             const delayed = window.every(n => n === 0 || !arr.includes(n));
             if (delayed) {
                 trials++;
                 const hit1 = arr.includes(numbersExtracted[i+3]);
-                const hit2 = arr.includes(numbersExtracted[i+4]);
+                const hit2 = arr.includes(numbersExtracted[i+4]); // Com 1 Gale
                 if (hit1 || hit2) hits++;
             }
         }
@@ -214,17 +212,16 @@ export const LabSimulator: React.FC = () => {
         }
     });
 
-    // Veredito Complexo
     let isApproved = false;
     let reason = "";
 
     if (entropy > 4.4) {
         reason = "Entropia Crítica (Mesa Caótica). Padrões destruídos pelo RNG.";
     } else if (approvedStrats.length === 0) {
-        reason = "Nenhuma matriz sobreviveu ao teste de variância nesta amostra.";
+        reason = "Mesa Hostil. Nenhuma matriz sobreviveu ao teste nesta amostra.";
     } else if (approvedStrats.length >= 2) {
         isApproved = true;
-        reason = "Múltiplas matrizes em ressonância com a mesa. Vantagem Matemática Confirmada.";
+        reason = "Múltiplas matrizes em ressonância. Vantagem Matemática Confirmada.";
     } else {
         reason = "Apenas uma matriz sobreviveu. Risco alto de dependência única.";
     }
@@ -269,7 +266,7 @@ export const LabSimulator: React.FC = () => {
       <AnimatePresence mode="wait">
         
         {/* ========================================== */}
-        {/* ABA 1: VALIDADOR OCR DE MESA */}
+        {/* ABA 1: VALIDADOR OCR DE MESA (O DRONE) */}
         {/* ========================================== */}
         {activeTab === 'VALIDATOR' && (
           <motion.div key="validator" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
@@ -278,10 +275,10 @@ export const LabSimulator: React.FC = () => {
               <span className="flex items-center gap-2 text-[10px] uppercase font-black text-blue-400 tracking-widest mb-2">
                 <Target className="w-4 h-4" /> Reconhecimento de Terreno
               </span>
-              <p className="text-xs text-slate-400 font-medium mb-6">Faça o upload do print com o histórico numérico da roleta atual para que a Inteligência extraia os dados e avalie o risco da mesa.</p>
+              <p className="text-xs text-slate-400 font-medium mb-6">Faça o upload do print com o histórico da roleta para a IA avaliar o risco da mesa instantaneamente (Consumo Flash On-Demand).</p>
 
               <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" id="ocr-upload" disabled={isAnalyzing} />
-              <label htmlFor="ocr-upload" className={`w-full py-5 rounded-xl border-2 border-dashed font-black uppercase tracking-widest flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${isAnalyzing ? 'bg-blue-900/20 border-blue-500/50 text-blue-400' : 'bg-[#0B101E] border-slate-700 text-slate-400 hover:border-blue-500 hover:text-blue-500'}`}>
+              <label htmlFor="ocr-upload" className={`w-full py-6 rounded-xl border-2 border-dashed font-black uppercase tracking-widest flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${isAnalyzing ? 'bg-blue-900/20 border-blue-500/50 text-blue-400' : 'bg-[#0B101E] border-slate-700 text-slate-400 hover:border-blue-500 hover:text-blue-500'}`}>
                 {isAnalyzing ? <Cpu className="w-8 h-8 animate-spin" /> : <UploadCloud className="w-8 h-8" />}
                 {isAnalyzing ? 'Processando Visão Computacional...' : 'ENVIAR PRINT DA ROLETA'}
               </label>
@@ -331,7 +328,6 @@ export const LabSimulator: React.FC = () => {
                      </div>
                    </div>
                 </div>
-
               </div>
             )}
           </motion.div>
