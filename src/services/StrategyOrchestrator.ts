@@ -38,11 +38,13 @@ export class StrategyOrchestrator {
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
     
-    // Matrizes Dinâmicas
+    // Matrizes Dinâmicas HFT
     "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false },
     "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false },
     "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false },
-    "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false }
+    "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false },
+    "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, targetBet: "MIDDLE_SIX_LINES", checkWin: () => false },
+    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 9, minChipsRequired: 9, targetBet: "SHOTGUN_STRIKE", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -50,6 +52,71 @@ export class StrategyOrchestrator {
       if (strategyName.includes(key)) return config;
     }
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
+  }
+
+  // ==========================================
+  // RADARES TÁTICOS HFT E FILTROS DINÂMICOS
+  // ==========================================
+  
+  public static getNeighbors(center: number, distance: number = 1): number[] {
+    const idx = EUROPEAN_WHEEL.indexOf(center);
+    if (idx === -1) return [];
+    const res: number[] = [];
+    for (let i = -distance; i <= distance; i++) {
+        res.push(EUROPEAN_WHEEL[(idx + i + 37) % 37]);
+    }
+    return res;
+  }
+
+  // NOVA TÁTICA: OPERAÇÃO TRIDENTE (SHOTGUN STRIKE)
+  public static detectOperacaoTridente(history: number[]): { target: string, chips: number, payout: number } | null {
+    if (history.length < 20) return null;
+    
+    const lastNum = history[0]; // Baseia-se no último número sorteado
+    let targets: number[] = [];
+    
+    // Tratamento de bordas lógicas da mesa
+    if (lastNum === 0) targets = [0, 1, 2];
+    else if (lastNum === 36) targets = [34, 35, 36];
+    else targets = [lastNum - 1, lastNum, lastNum + 1];
+
+    const tridentNumbers = new Set<number>();
+    targets.forEach(t => {
+        const neighbors = this.getNeighbors(t, 1);
+        neighbors.forEach(n => tridentNumbers.add(n));
+    });
+    
+    const tridentArr = Array.from(tridentNumbers);
+
+    // Validação de Dispersão (Anomalia do RNG)
+    const recent20 = history.slice(0, 20);
+    let hits = 0;
+    recent20.forEach(n => { if (tridentArr.includes(n)) hits++; });
+
+    // Se as micro-zonas estiverem quentes (>= 6 hits em 20 giros, acima da média), autoriza disparo
+    if (hits >= 6) {
+        return { target: `TRIDENT_${tridentArr.join("-")}`, chips: tridentArr.length, payout: 36 / tridentArr.length };
+    }
+    return null;
+  }
+
+  // NOVA TÁTICA: ROLO COMPRESSOR
+  public static detectRoloCompressor(history: number[]): { target: string, chips: number, payout: number } | null {
+    if (history.length < 15) return null;
+    
+    const deathZone = [0, 1, 2, 3, 34, 35, 36];
+    const recent15 = history.slice(0, 15);
+    
+    let deathHits = 0;
+    for(const n of recent15) {
+        if(deathZone.includes(n)) deathHits++;
+    }
+    
+    // Se a zona da morte não apareceu NENHUMA vez (Caminho livre no centro), ataca!
+    if(deathHits === 0) {
+        return { target: "MIDDLE_SIX_LINES", chips: 5, payout: 1.2 };
+    }
+    return null;
   }
 
   public static detectSniperAnomaly(history: number[]): { target: string, chips: number, payout: number } | null {
@@ -197,6 +264,14 @@ export class StrategyOrchestrator {
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber);
              payoutR = 36 / targetNumbers.length;
+          } else if (sig.strategy.name === "Dynamic: Rolo Compressor") {
+             isWin = newNumber >= 4 && newNumber <= 33;
+             payoutR = 1.2; 
+          } else if (sig.strategy.name === "Dynamic: Operacao Tridente") {
+             const numbersStr = sig.target_bet.replace("TRIDENT_", "");
+             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             isWin = targetNumbers.includes(newNumber);
+             payoutR = 36 / targetNumbers.length;
           } else {
              isWin = config.checkWin(newNumber);
              payoutR = config.payoutRatio;
@@ -232,28 +307,27 @@ export class StrategyOrchestrator {
       if (spinNumbersTimeline.length < 10) return; 
 
       const entropy = this.calculateShannonEntropy(spinNumbersTimeline);
-      if (entropy > 4.60) return; // Caos. Bloqueia operações.
+      if (entropy > 4.60) return; // Caos absoluto. Bloqueia novas operações.
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      // Injeção de Auto-Cura (Correção de Schema Aplicada)
+      // ==========================================
+      // AUTO-CURA DO BANCO DE DADOS (Bootstrapping)
+      // ==========================================
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
-      if (!heatStrategy) { 
-          heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", bayes_weight: 1.0, is_active: true } }); 
-          activeStrategies.push(heatStrategy); 
-      }
+      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", bayes_weight: 1.0, is_active: true } }); activeStrategies.push(heatStrategy); }
       
       let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
-      if (!sniperStrategy) { 
-          sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", bayes_weight: 1.5, is_active: true } }); 
-          activeStrategies.push(sniperStrategy); 
-      }
+      if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(sniperStrategy); }
       
       let quantumStrategy = activeStrategies.find(s => s.name === "Dynamic: Quantum Intersection");
-      if (!quantumStrategy) { 
-          quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção de matrizes", bayes_weight: 2.0, is_active: true } }); 
-          activeStrategies.push(quantumStrategy); 
-      }
+      if (!quantumStrategy) { quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção", bayes_weight: 2.0, is_active: true } }); activeStrategies.push(quantumStrategy); }
+
+      let roloStrategy = activeStrategies.find(s => s.name === "Dynamic: Rolo Compressor");
+      if (!roloStrategy) { roloStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Rolo Compressor", description: "Cerco agressivo central (Six Lines)", bayes_weight: 1.2, is_active: true } }); activeStrategies.push(roloStrategy); }
+
+      let tridenteStrategy = activeStrategies.find(s => s.name === "Dynamic: Operacao Tridente");
+      if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(tridenteStrategy); }
 
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
@@ -261,7 +335,12 @@ export class StrategyOrchestrator {
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
         
         if (lastSignal && lastSignal.result === "LOSS") {
-          const maxGales = strategy.name === "Dynamic: Sniper Anomaly" ? 2 : 1;
+          // Rolo Compressor não tem Gale. Tridente tem limite de 3. Sniper tem 2. Padrão 1.
+          let maxGales = 1;
+          if (strategy.name === "Dynamic: Rolo Compressor") maxGales = 0;
+          else if (strategy.name === "Dynamic: Operacao Tridente") maxGales = 3;
+          else if (strategy.name === "Dynamic: Sniper Anomaly") maxGales = 2;
+
           const nextStep = lastSignal.martingale_step + 1;
           
           if (nextStep <= maxGales) { 
@@ -276,8 +355,11 @@ export class StrategyOrchestrator {
                 config.payoutRatio = lastSignal.target_bet.includes("ZERO") ? 17/19 : 2.0;
                 config.minChipsRequired = lastSignal.target_bet.includes("ZERO") ? 19 : 1;
             } else if (strategy.name === "Dynamic: Quantum Intersection") {
-                const numbersStr = lastSignal.target_bet.replace("INTERSECTION_", "");
-                const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+                const targetNumbers = lastSignal.target_bet.replace("INTERSECTION_", "").split("-").map(n => parseInt(n));
+                config.payoutRatio = 36 / targetNumbers.length;
+                config.minChipsRequired = targetNumbers.length;
+            } else if (strategy.name === "Dynamic: Operacao Tridente") {
+                const targetNumbers = lastSignal.target_bet.replace("TRIDENT_", "").split("-").map(n => parseInt(n));
                 config.payoutRatio = 36 / targetNumbers.length;
                 config.minChipsRequired = targetNumbers.length;
             }
@@ -290,9 +372,10 @@ export class StrategyOrchestrator {
       }
 
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
-      if (anyActive) return; 
+      if (anyActive) return; // Aguarda a resolução da aposta atual
 
-      // 2. DETECÇÃO TÁTICA SUPREMA: SNIPER DE ANOMALIAS
+      // 2. DETECÇÃO TÁTICA SUPREMA (Anomalias Dinâmicas)
+      
       const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
       if (sniperAnomaly !== null && sniperStrategy) {
          const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
@@ -300,7 +383,21 @@ export class StrategyOrchestrator {
          return;
       }
 
-      // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO
+      const roloAnomaly = this.detectRoloCompressor(spinNumbersTimeline);
+      if (roloAnomaly !== null && roloStrategy) {
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, roloAnomaly.chips, 81.08, roloAnomaly.payout);
+         await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+         return;
+      }
+
+      const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
+      if (tridenteAnomaly !== null && tridenteStrategy) {
+         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 24.32, tridenteAnomaly.payout);
+         await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+         return;
+      }
+
+      // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO (Legado)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
           const lastSigTime = new Date(closedCycles[0].created_at).getTime();
@@ -356,14 +453,7 @@ export class StrategyOrchestrator {
           const exactBetAmount = session.min_chip * intersectionNumbers.length;
 
           await prisma.signal.create({ 
-            data: { 
-              session_id: session.id, 
-              strategy_id: quantumStrategy.id, 
-              target_bet: targetStr, 
-              suggested_amount: exactBetAmount, 
-              martingale_step: 0, 
-              result: "SUGGESTED" 
-            } 
+            data: { session_id: session.id, strategy_id: quantumStrategy.id, target_bet: targetStr, suggested_amount: exactBetAmount, martingale_step: 0, result: "SUGGESTED" } 
           });
           return; 
         }
