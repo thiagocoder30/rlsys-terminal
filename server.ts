@@ -123,19 +123,59 @@ app.post("/api/simulate", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// MOTOR TÁTICO DE INJEÇÃO DIRETA
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
     const { initial_bankroll, min_chip, numbers } = req.body;
-    const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
+
+    // 1. Desarma qualquer sessão ativa residual para evitar conflito de front-end
+    await prisma.session.updateMany({
+      where: { status: "ACTIVE" },
+      data: { status: "CLOSED", closed_at: new Date() }
+    });
+
+    // 2. Inicia a nova operação
+    const session = await prisma.session.create({ 
+      data: { 
+        initial_bankroll, 
+        current_bankroll: initial_bankroll, 
+        highest_bankroll: initial_bankroll, 
+        min_chip, 
+        status: "ACTIVE" 
+      } 
+    });
+
     const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
 
+    // 3. Injeta a matriz do terreno (OCR)
     for (const num of safeNumbers) {
       await prisma.spin.create({
-        data: { session_id: session.id, number: num, color: getNumberColor(num), parity: getNumberParity(num), dozen: getNumberDozen(num), column: getNumberColumn(num), half: getNumberHalf(num) }
+        data: { 
+          session_id: session.id, 
+          number: num, 
+          color: getNumberColor(num), 
+          parity: getNumberParity(num), 
+          dozen: getNumberDozen(num), 
+          column: getNumberColumn(num), 
+          half: getNumberHalf(num) 
+        }
       });
     }
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+
+    // 4. Acorda a Inteligência Artificial para analisar o território instantaneamente
+    const recentSpins = await prisma.spin.findMany({
+      where: { session_id: session.id },
+      orderBy: { created_at: "desc" },
+      take: 50
+    });
+    const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
+    await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
+
+    res.json({ success: true, session });
+  } catch (error: any) { 
+    console.error("[WARM-START ERROR]:", error.message);
+    res.status(500).json({ error: error.message }); 
+  }
 });
 
 app.post("/api/sessions", async (req, res) => {
