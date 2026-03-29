@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import multer from "multer";
+import fs from "fs";
 import { PrismaClient } from "@prisma/client";
 import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
 import { SimulationEngine } from "./src/services/SimulationEngine";
@@ -61,21 +62,29 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
     const apiKey = process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
 
+    // PREPARAÇÃO DA CAIXA PRETA (LOGS)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const logDir = path.join(process.cwd(), "logs", "ocr");
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    const imagePath = path.join(logDir, `${timestamp}-image.jpg`);
+    fs.writeFileSync(imagePath, req.file.buffer);
+
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const model = genAI.getGenerativeModel({
       model: "gemini-3-flash-preview",
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" }
+      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "text/plain" }
     });
 
     const result = await model.generateContent([
       `You are a highly precise OCR for a roulette game.
       CRITICAL INSTRUCTIONS:
       1. Analyze the provided image, which contains a history of recently drawn roulette numbers.
-      2. The numbers are displayed in a grid format (rows and columns).
-      3. Extract ALL the numbers you see in this grid. Read them row by row, from left to right, top to bottom.
-      4. Ignore text like "ÚLTIMOS 500", "QUENTE E FRIO", IDs, or balances.
-      Return ONLY valid JSON: {"numbers": [int, int, ...]}`,
+      2. Extract ALL the numbers you see in this grid. Read them row by row, from left to right, top to bottom.
+      3. Ignore text like "ÚLTIMOS 500", "QUENTE E FRIO", IDs, or balances.
+      Return ONLY a JSON array like this: {"numbers": [int, int, ...]}`,
       {
         inlineData: {
           data: req.file.buffer.toString("base64"),
@@ -84,13 +93,46 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
       }
     ]);
 
-    let rawText = result.response.text();
-    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const rawText = result.response.text();
+    let numbers: number[] = [];
 
-    const jsonObj = JSON.parse(rawText);
-    const numbers = [...(jsonObj.numbers || [])];
+    try {
+      const cleanText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const jsonObj = JSON.parse(cleanText);
+      if (jsonObj.numbers && Array.isArray(jsonObj.numbers)) {
+        numbers = jsonObj.numbers;
+      }
+    } catch (e) {
+      console.warn("[HAWK-EYE] Parse JSON elegante falhou. Iniciando extração por força bruta (Regex).");
+    }
 
-    if (numbers.length === 0) throw new Error("A Inteligência não extraiu números do print enviado.");
+    if (numbers.length === 0) {
+      const matches = rawText.match(/\b\d{1,2}\b/g);
+      if (matches) {
+        numbers = matches.map(n => parseInt(n, 10));
+      }
+    }
+
+    numbers = numbers.filter(n => !isNaN(n) && n >= 0 && n <= 36);
+
+    // GRAVAÇÃO DA CAIXA PRETA
+    const logContent = `
+=========================================
+CAIXA PRETA OCR - SESSÃO: ${timestamp}
+=========================================
+IMAGEM GRAVADA: ${imagePath}
+
+--- TEXTO BRUTO DEVOLVIDO PELA IA (GEMINI) ---
+${rawText}
+
+--- ARRAY FINAL EXTRAÍDO PELO CÉREBRO HFT ---
+${JSON.stringify(numbers)}
+=========================================
+    `;
+    fs.writeFileSync(path.join(logDir, `${timestamp}-log.txt`), logContent);
+    console.log(logContent);
+
+    if (numbers.length < 5) throw new Error("A Inteligência não extraiu números suficientes do print enviado. Verifique o log.");
 
     res.json({ numbers });
   } catch (error: any) {
@@ -121,7 +163,6 @@ app.post("/api/simulate", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// MOTOR TÁTICO DE INJEÇÃO DIRETA (COM CORREÇÃO DE ESPELHO)
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
     const { initial_bankroll, min_chip, numbers } = req.body;
@@ -143,9 +184,6 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
 
-    // CORREÇÃO TÁTICA APLICADA AQUI: Inverter o array.
-    // O OCR lê o mais novo (topo) para o mais antigo (base).
-    // Invertendo, salvamos o mais antigo primeiro, e o mais novo por último, mantendo a ordem temporal perfeita.
     safeNumbers.reverse();
 
     for (const num of safeNumbers) {
