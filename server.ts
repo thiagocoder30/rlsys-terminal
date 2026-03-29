@@ -63,13 +63,11 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // MODELO CORRIGIDO PARA A SUA INFRAESTRUTURA (GEMINI 3 FLASH)
     const model = genAI.getGenerativeModel({
       model: "gemini-3-flash-preview",
       generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "application/json" }
     });
 
-    // PROMPT PARA LER A GRADE DE "ÚLTIMOS 500"
     const result = await model.generateContent([
       `You are a highly precise OCR for a roulette game.
       CRITICAL INSTRUCTIONS:
@@ -123,18 +121,16 @@ app.post("/api/simulate", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// MOTOR TÁTICO DE INJEÇÃO DIRETA
+// MOTOR TÁTICO DE INJEÇÃO DIRETA (COM CORREÇÃO DE ESPELHO)
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
     const { initial_bankroll, min_chip, numbers } = req.body;
 
-    // 1. Desarma qualquer sessão ativa residual para evitar conflito de front-end
     await prisma.session.updateMany({
       where: { status: "ACTIVE" },
       data: { status: "CLOSED", closed_at: new Date() }
     });
 
-    // 2. Inicia a nova operação
     const session = await prisma.session.create({ 
       data: { 
         initial_bankroll, 
@@ -147,7 +143,11 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
 
-    // 3. Injeta a matriz do terreno (OCR)
+    // CORREÇÃO TÁTICA APLICADA AQUI: Inverter o array.
+    // O OCR lê o mais novo (topo) para o mais antigo (base).
+    // Invertendo, salvamos o mais antigo primeiro, e o mais novo por último, mantendo a ordem temporal perfeita.
+    safeNumbers.reverse();
+
     for (const num of safeNumbers) {
       await prisma.spin.create({
         data: { 
@@ -162,7 +162,6 @@ app.post("/api/sessions/warm-start", async (req, res) => {
       });
     }
 
-    // 4. Acorda a Inteligência Artificial para analisar o território instantaneamente
     const recentSpins = await prisma.spin.findMany({
       where: { session_id: session.id },
       orderBy: { created_at: "desc" },
