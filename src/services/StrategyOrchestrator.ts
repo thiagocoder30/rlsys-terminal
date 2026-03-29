@@ -44,7 +44,8 @@ export class StrategyOrchestrator {
     "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false },
     "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false },
     "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, targetBet: "MIDDLE_SIX_LINES", checkWin: () => false },
-    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 18, minChipsRequired: 18, targetBet: "SHOTGUN_STRIKE_V2", checkWin: () => false }
+    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 18, minChipsRequired: 18, targetBet: "SHOTGUN_STRIKE_V2", checkWin: () => false },
+    "Dynamic: Terminais Altos": { payoutRatio: 4.0, coverage: 9, minChipsRequired: 9, targetBet: "TERMINAIS_ALTOS", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
@@ -68,9 +69,51 @@ export class StrategyOrchestrator {
     return res;
   }
 
+  // NOVA TÁTICA: RASTREADOR DE TERMINAIS ALTOS CONDICIONAL
+  public static detectTerminaisAltos(history: number[]): { target: string, chips: number, payout: number } | null {
+    if (history.length < 12) return null;
+    
+    const recent12 = history.slice(0, 12);
+    let has7 = false, has8 = false, has9 = false;
+
+    // Escaneia os últimos 12 giros verificando a presença dos terminais 7, 8 e 9
+    recent12.forEach(n => {
+        const term = n % 10;
+        if (term === 7) has7 = true;
+        if (term === 8) has8 = true;
+        if (term === 9) has9 = true;
+    });
+
+    let targets: number[] = [];
+
+    // Condição A: Todos ausentes -> Ataca os 3 terminais altos
+    if (!has7 && !has8 && !has9) {
+        targets = [7, 17, 27, 8, 18, 28, 9, 19, 29];
+    } 
+    // Condição B: Algum ausente -> Ataca os ausentes + os terminais Zero
+    else if (!has7 || !has8 || !has9) {
+        if (!has7) targets.push(7, 17, 27);
+        if (!has8) targets.push(8, 18, 28);
+        if (!has9) targets.push(9, 19, 29);
+        targets.push(0, 10, 20, 30);
+    } 
+    // Condição C: Todos presentes -> Atraso não confirmado, abortar.
+    else {
+        return null; 
+    }
+
+    if (targets.length > 0) {
+        return {
+            target: `TERMINALS_${targets.join("-")}`,
+            chips: targets.length,
+            payout: 36 / targets.length
+        };
+    }
+    return null;
+  }
+
   public static detectOperacaoTridente(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 20) return null;
-    
     const num1 = history[0]; 
     const num2 = history[1]; 
     
@@ -82,7 +125,6 @@ export class StrategyOrchestrator {
 
     const base1 = getTargetsFor(num1);
     const base2 = getTargetsFor(num2);
-
     const tridentNumbers = new Set<number>();
     [...base1, ...base2].forEach(t => {
         const neighbors = this.getNeighbors(t, 1);
@@ -90,7 +132,6 @@ export class StrategyOrchestrator {
     });
     
     const tridentArr = Array.from(tridentNumbers);
-
     const recent20 = history.slice(0, 20);
     let hits = 0;
     recent20.forEach(n => { if (tridentArr.includes(n)) hits++; });
@@ -104,18 +145,12 @@ export class StrategyOrchestrator {
 
   public static detectRoloCompressor(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 15) return null;
-    
     const deathZone = [0, 1, 2, 3, 34, 35, 36];
     const recent15 = history.slice(0, 15);
-    
     let deathHits = 0;
-    for(const n of recent15) {
-        if(deathZone.includes(n)) deathHits++;
-    }
+    for(const n of recent15) { if(deathZone.includes(n)) deathHits++; }
     
-    if(deathHits === 0) {
-        return { target: "MIDDLE_SIX_LINES", chips: 5, payout: 1.2 };
-    }
+    if(deathHits === 0) { return { target: "MIDDLE_SIX_LINES", chips: 5, payout: 1.2 }; }
     return null;
   }
 
@@ -272,6 +307,11 @@ export class StrategyOrchestrator {
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber);
              payoutR = 36 / targetNumbers.length;
+          } else if (sig.strategy.name === "Dynamic: Terminais Altos") {
+             const numbersStr = sig.target_bet.replace("TERMINALS_", "");
+             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             isWin = targetNumbers.includes(newNumber);
+             payoutR = 36 / targetNumbers.length;
           } else {
              isWin = config.checkWin(newNumber);
              payoutR = config.payoutRatio;
@@ -326,6 +366,9 @@ export class StrategyOrchestrator {
       let tridenteStrategy = activeStrategies.find(s => s.name === "Dynamic: Operacao Tridente");
       if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão dupla", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(tridenteStrategy); }
 
+      let terminaisStrategy = activeStrategies.find(s => s.name === "Dynamic: Terminais Altos");
+      if (!terminaisStrategy) { terminaisStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Terminais Altos", description: "Rastreador de atraso de terminais (Hit & Run)", bayes_weight: 1.8, is_active: true } }); activeStrategies.push(terminaisStrategy); }
+
       // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
@@ -335,7 +378,7 @@ export class StrategyOrchestrator {
           let maxGales = 1;
           if (strategy.name === "Dynamic: Rolo Compressor") maxGales = 0;
           else if (strategy.name === "Dynamic: Operacao Tridente") maxGales = 3;
-          else if (strategy.name === "Dynamic: Sniper Anomaly") maxGales = 2;
+          else if (strategy.name === "Dynamic: Sniper Anomaly" || strategy.name === "Dynamic: Terminais Altos") maxGales = 2;
 
           const nextStep = lastSignal.martingale_step + 1;
           
@@ -356,6 +399,10 @@ export class StrategyOrchestrator {
                 config.minChipsRequired = targetNumbers.length;
             } else if (strategy.name === "Dynamic: Operacao Tridente") {
                 const targetNumbers = lastSignal.target_bet.replace("TRIDENT_", "").split("-").map(n => parseInt(n));
+                config.payoutRatio = 36 / targetNumbers.length;
+                config.minChipsRequired = targetNumbers.length;
+            } else if (strategy.name === "Dynamic: Terminais Altos") {
+                const targetNumbers = lastSignal.target_bet.replace("TERMINALS_", "").split("-").map(n => parseInt(n));
                 config.payoutRatio = 36 / targetNumbers.length;
                 config.minChipsRequired = targetNumbers.length;
             }
@@ -415,6 +462,16 @@ export class StrategyOrchestrator {
         }
       }
 
+      if (terminaisStrategy && !isOnCooldown(terminaisStrategy.id, 3, 15)) {
+        const termAnomaly = this.detectTerminaisAltos(spinNumbersTimeline);
+        if (termAnomaly !== null) {
+           const winRate = (termAnomaly.chips / 37) * 100;
+           const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, termAnomaly.chips, winRate, termAnomaly.payout);
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: terminaisStrategy.id, target_bet: termAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           return;
+        }
+      }
+
       // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO (Legado)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
@@ -456,7 +513,6 @@ export class StrategyOrchestrator {
 
       const validCandidates = candidates.filter(c => c.zScore <= c.requiredZScore && c.markovProb >= ((c.config.coverage / 37) * 0.75));
 
-      // MOTOR CHARLIE: INTERSEÇÃO MULTIDIMENSIONAL
       if (validCandidates.length >= 2 && quantumStrategy) {
         validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
         const top1 = validCandidates[0];
