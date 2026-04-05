@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, TrendingUp, TrendingDown, Database, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu, Zap } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, FlaskConical, Play, CheckCircle2, XCircle, Database, Target, ShieldCheck, AlertTriangle, UploadCloud, Cpu, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ==========================================
@@ -67,6 +67,7 @@ export const LabSimulator: React.FC = () => {
   // --- ESTADOS DO VALIDADOR OCR ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [validatorResult, setValidatorResult] = useState<any>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -101,7 +102,9 @@ export const LabSimulator: React.FC = () => {
   };
 
   const runBacktest = () => {
-    if (historySpins.length < 50) alert("Aviso: Poucos dados históricos no banco de dados.");
+    if (historySpins.length < 50) {
+        setOcrError("Aviso: Poucos dados históricos no banco de dados para um Backtest preciso.");
+    }
 
     let theoreticalBankroll = 100; 
     let wins = 0; let losses = 0; let gales = 0;
@@ -159,7 +162,11 @@ export const LabSimulator: React.FC = () => {
   // ==========================================
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
+    
     setIsAnalyzing(true);
+    setOcrError(null);
+    setValidatorResult(null);
+    
     const file = e.target.files[0];
     const formData = new FormData();
     formData.append("image", file);
@@ -168,8 +175,14 @@ export const LabSimulator: React.FC = () => {
       const res = await fetch("/api/vision/analyze-table", { method: "POST", body: formData });
       const data = await res.json();
       
+      if (!res.ok) {
+          setOcrError(`Falha no Servidor de Visão: ${data.error || 'Erro de conexão.'}`);
+          setIsAnalyzing(false);
+          return;
+      }
+
       if (!data.numbers || data.numbers.length < 5) {
-        alert("Erro OCR: A IA não conseguiu extrair números suficientes da imagem.");
+        setOcrError("FALHA DE EXTRAÇÃO ÓPTICA: A Inteligência não conseguiu mapear a grade numérica. Evite usar tela dividida (Split Screen) ou imagens borradas. Envie um print limpo do histórico da roleta.");
         setIsAnalyzing(false);
         return;
       }
@@ -177,7 +190,7 @@ export const LabSimulator: React.FC = () => {
       evaluateTableData(data.numbers);
     } catch (err) {
       console.error("Erro na API do OCR", err);
-      alert("Falha de Conexão com o Servidor de Visão.");
+      setOcrError("Falha crítica de comunicação com o Cérebro HFT.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -189,6 +202,7 @@ export const LabSimulator: React.FC = () => {
     const approvedStrats: { name: string, winRate: number }[] = [];
     const rejectedStrats: { name: string, winRate: number }[] = [];
 
+    // Baixamos a exigência de winrate interno de 60% para 55% para absorver entropias entre 4.40 e 4.60
     Object.entries(BASE_SECTORS).forEach(([name, arr]) => {
         let hits = 0; let trials = 0;
         for (let i = 0; i < numbersExtracted.length - 4; i++) {
@@ -204,7 +218,7 @@ export const LabSimulator: React.FC = () => {
         
         if (trials > 0) {
             const wr = (hits / trials) * 100;
-            if (wr >= 60) approvedStrats.push({ name, winRate: wr });
+            if (wr >= 55) approvedStrats.push({ name, winRate: wr });
             else rejectedStrats.push({ name, winRate: wr });
         }
     });
@@ -212,7 +226,8 @@ export const LabSimulator: React.FC = () => {
     let isApproved = false;
     let reason = "";
 
-    if (entropy > 4.4) {
+    // TRAVA ABSOLUTA DE VIX UNIFICADA (Aumentada para 4.60)
+    if (entropy > 4.60) {
         reason = "Entropia Crítica (Mesa Caótica). Padrões destruídos pelo RNG.";
     } else if (approvedStrats.length === 0) {
         reason = "Mesa Hostil. Nenhuma matriz sobreviveu ao teste nesta amostra.";
@@ -238,9 +253,6 @@ export const LabSimulator: React.FC = () => {
   // ==========================================
   const injectAndEngage = () => {
     if (!validatorResult || !validatorResult.numbers) return;
-    
-    // Teletransporte tático para a tela de Setup
-    // Enviamos a matriz de números escondida na propriedade "state" da navegação
     navigate("/setup", { state: { injectedNumbers: validatorResult.numbers } });
   };
 
@@ -288,7 +300,17 @@ export const LabSimulator: React.FC = () => {
               </label>
             </div>
 
-            {validatorResult && (
+            {ocrError && (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-red-950/40 border border-red-500/50 p-5 rounded-2xl flex items-start gap-4">
+                 <AlertTriangle className="w-6 h-6 text-red-500 flex-shrink-0 mt-1" />
+                 <div>
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-red-500 mb-1">Aviso do Sistema</span>
+                    <p className="text-xs font-bold text-slate-300 leading-relaxed">{ocrError}</p>
+                 </div>
+              </motion.div>
+            )}
+
+            {validatorResult && !ocrError && (
               <div className={`p-6 rounded-2xl border shadow-xl ${validatorResult.isApproved ? 'bg-emerald-950/30 border-emerald-500' : 'bg-red-950/30 border-red-500'}`}>
                 <div className="text-center border-b border-slate-800/50 pb-5 mb-5">
                   <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Veredito da Inteligência</span>
@@ -307,7 +329,8 @@ export const LabSimulator: React.FC = () => {
 
                 <div className="flex justify-between items-center bg-[#0B101E] p-4 rounded-xl border border-slate-800 mb-5">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Entropia (Índice VIX)</span>
-                  <span className={`text-xl font-black font-mono ${validatorResult.entropy > 4.2 ? 'text-red-400' : 'text-emerald-400'}`}>{validatorResult.entropy.toFixed(2)}</span>
+                  {/* Cor do VIX baseada na nova trava de 4.60 */}
+                  <span className={`text-xl font-black font-mono ${validatorResult.entropy > 4.60 ? 'text-red-400' : 'text-emerald-400'}`}>{validatorResult.entropy.toFixed(2)}</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
