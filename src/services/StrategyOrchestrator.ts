@@ -391,7 +391,7 @@ export class StrategyOrchestrator {
             }
 
             const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: lastSignal.target_bet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED" } });
+            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: lastSignal.target_bet, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED", type: "LIVE" } });
             return; 
           }
         }
@@ -418,7 +418,7 @@ export class StrategyOrchestrator {
         const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
         if (sniperAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -427,7 +427,7 @@ export class StrategyOrchestrator {
         const roloAnomaly = this.detectRoloCompressor(spinNumbersTimeline);
         if (roloAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, roloAnomaly.chips, 81.08, roloAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -436,7 +436,7 @@ export class StrategyOrchestrator {
         const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
         if (tridenteAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 48.6, tridenteAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -446,7 +446,7 @@ export class StrategyOrchestrator {
         if (termAnomaly !== null) {
            const winRate = (termAnomaly.chips / 37) * 100;
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, termAnomaly.chips, winRate, termAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: terminaisStrategy.id, target_bet: termAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: terminaisStrategy.id, target_bet: termAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -505,7 +505,7 @@ export class StrategyOrchestrator {
           const exactBetAmount = session.min_chip * intersectionNumbers.length;
 
           await prisma.signal.create({ 
-            data: { session_id: session.id, strategy_id: quantumStrategy.id, target_bet: targetStr, suggested_amount: exactBetAmount, martingale_step: 0, result: "SUGGESTED" } 
+            data: { session_id: session.id, strategy_id: quantumStrategy.id, target_bet: targetStr, suggested_amount: exactBetAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } 
           });
           return; 
         }
@@ -516,7 +516,7 @@ export class StrategyOrchestrator {
         const topCandidate = validCandidates[0]; 
         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, topCandidate.config.minChipsRequired, topCandidate.winRate, topCandidate.config.payoutRatio);
 
-        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED" } });
+        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
       }
 
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
