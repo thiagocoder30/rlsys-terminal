@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 // ==========================================
-// CONFIGURAÇÃO RESTAURADA (COM MOTOR DE DESIGN E PROXY ENTERPRISE)
+// CONFIGURAÇÃO PROXY ENTERPRISE
 // ==========================================
 export default defineConfig({
   plugins: [
@@ -11,8 +11,8 @@ export default defineConfig({
     tailwindcss()
   ],
   server: {
-    // Intercepta requisições e envia para o servidor local
     proxy: {
+      // Redireciona chamadas /api para o servidor Express
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
