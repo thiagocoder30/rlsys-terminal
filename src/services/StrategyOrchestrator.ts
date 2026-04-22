@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 interface StrategyConfig {
   payoutRatio: number; 
   coverage: number; 
-  target: string; // Atualizado para coincidir com o schema
+  target: string; 
   minChipsRequired: number; 
   checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
@@ -22,14 +22,12 @@ export class StrategyOrchestrator {
     "Race: Fusion": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "FUSION_MAIS_ZERO", checkWin: (num) => [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26, 0].includes(num) },
     "Race: P2": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "ESTRATEGIA_P2", checkWin: (num) => [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 29, 30, 31, 32, 34, 35].includes(num) },
     "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, target: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
-    
     "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0 },
     "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0 },
     "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0 },
     "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0 },
     "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0 },
     "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0 },
-
     "Macro: Red + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "RED_MAIS_ZERO", checkWin: (n) => RED_NUMBERS.includes(n) || n === 0 },
     "Macro: Black + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "BLACK_MAIS_ZERO", checkWin: (n) => BLACK_NUMBERS.includes(n) || n === 0 },
     "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
@@ -40,10 +38,6 @@ export class StrategyOrchestrator {
     "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
     "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
     "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, target: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
-    
-    // Matrizes Dinâmicas HFT
-    "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, target: "DROP_ZONE", checkWin: () => false },
-    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, target: "HEATMAP_CLUSTER", checkWin: () => false },
     "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, target: "SNIPER_ANOMALY", checkWin: () => false },
     "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, target: "QUANTUM_INTERSECTION", checkWin: () => false },
     "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, target: "MIDDLE_SIX_LINES", checkWin: () => false },
@@ -145,40 +139,6 @@ export class StrategyOrchestrator {
     return null;
   }
 
-  public static calculatePhysicalDropZone(history: number[]): number | null {
-    if (history.length < 5) return null;
-    const getDistance = (n1: number, n2: number) => {
-      const i1 = EUROPEAN_WHEEL.indexOf(n1); const i2 = EUROPEAN_WHEEL.indexOf(n2);
-      if (i1 === -1 || i2 === -1) return 0;
-      let dist = i2 - i1; if (dist < 0) dist += 37; return dist;
-    };
-    const d1 = getDistance(history[1], history[0]);
-    const d2 = getDistance(history[2], history[1]);
-    const d3 = getDistance(history[3], history[2]);
-    const avg = Math.round((d1 + d2 + d3) / 3);
-    const isConsistent = Math.abs(d1 - avg) <= 2 && Math.abs(d2 - avg) <= 2 && Math.abs(d3 - avg) <= 2;
-    if (isConsistent) return EUROPEAN_WHEEL[(EUROPEAN_WHEEL.indexOf(history[0]) + avg) % 37];
-    return null;
-  }
-
-  public static calculateHeatmapClusterTarget(history: number[]): number | null {
-    const sample = history.slice(0, 50); const n = sample.length;
-    if (n < 20) return null; 
-    const frequencies: Record<number, number> = {};
-    EUROPEAN_WHEEL.forEach(num => frequencies[num] = 0);
-    sample.forEach(num => { if (frequencies[num] !== undefined) frequencies[num]++; });
-    let bestCenter: number | null = null; let maxClusterHits = 0;
-    for (let i = 0; i < EUROPEAN_WHEEL.length; i++) {
-      const center = EUROPEAN_WHEEL[i];
-      const clusterHits = frequencies[EUROPEAN_WHEEL[(i - 2 + 37) % 37]] + frequencies[EUROPEAN_WHEEL[(i - 1 + 37) % 37]] + frequencies[center] + frequencies[EUROPEAN_WHEEL[(i + 1) % 37]] + frequencies[EUROPEAN_WHEEL[(i + 2) % 37]];
-      if (clusterHits > maxClusterHits) { maxClusterHits = clusterHits; bestCenter = center; }
-    }
-    const p = 5 / 37; const expected = n * p; const stdDev = Math.sqrt(n * p * (1 - p));
-    if (stdDev === 0) return null;
-    if ((maxClusterHits - expected) / stdDev >= 2.0 && bestCenter !== null) return bestCenter;
-    return null;
-  }
-
   public static calculateShannonEntropy(history: number[]): number {
     if (history.length < 10) return 0;
     const sample = history.slice(0, 37); const counts: Record<number, number> = {};
@@ -239,15 +199,7 @@ export class StrategyOrchestrator {
           await prisma.signal.update({ where: { id: sig.id }, data: { result: "MISSED" } });
         } else if (sig.result === "PENDING") {
           let isWin = false; let payoutR = 1.0; const config = this.getConfig(sig.strategy.name);
-          if (sig.strategy.name === "Dynamic: Drop Zone" || sig.strategy.name === "Dynamic: Heatmap Cluster") {
-             const targetStr = sig.target.split("_").pop(); 
-             if (targetStr) {
-                 const targetNum = parseInt(targetStr); const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
-                 const winningSet = [EUROPEAN_WHEEL[(targetIndex - 2 + 37) % 37], EUROPEAN_WHEEL[(targetIndex - 1 + 37) % 37], targetNum, EUROPEAN_WHEEL[(targetIndex + 1) % 37], EUROPEAN_WHEEL[(targetIndex + 2) % 37]];
-                 isWin = winningSet.includes(newNumber);
-             }
-             payoutR = config.payoutRatio;
-          } else if (sig.strategy.name === "Dynamic: Sniper Anomaly") {
+          if (sig.strategy.name === "Dynamic: Sniper Anomaly") {
              const target = sig.target;
              if (target === "SNIPER_DUZ_1") isWin = newNumber >= 1 && newNumber <= 12;
              else if (target === "SNIPER_DUZ_2") isWin = newNumber >= 13 && newNumber <= 24;
@@ -259,18 +211,15 @@ export class StrategyOrchestrator {
              else if (target === "SNIPER_BLACK_ZERO") isWin = BLACK_NUMBERS.includes(newNumber) || newNumber === 0;
              payoutR = target.includes("ZERO") ? 17/19 : 2.0;
           } else if (sig.strategy.name === "Dynamic: Quantum Intersection") {
-             const numbersStr = sig.target.replace("INTERSECTION_", "");
-             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             const targetNumbers = sig.target.replace("INTERSECTION_", "").split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else if (sig.strategy.name === "Dynamic: Rolo Compressor") {
              isWin = newNumber >= 4 && newNumber <= 33; payoutR = 1.2; 
           } else if (sig.strategy.name === "Dynamic: Operacao Tridente") {
-             const numbersStr = sig.target.replace("TRIDENT_", "");
-             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             const targetNumbers = sig.target.replace("TRIDENT_", "").split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else if (sig.strategy.name === "Dynamic: Terminais Altos") {
-             const numbersStr = sig.target.replace("TERMINALS_", "");
-             const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
+             const targetNumbers = sig.target.replace("TERMINALS_", "").split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else {
              isWin = config.checkWin(newNumber); payoutR = config.payoutRatio;
@@ -300,9 +249,6 @@ export class StrategyOrchestrator {
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
-      let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
-      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", is_active: true } }); activeStrategies.push(heatStrategy); }
-      
       let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
       if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", is_active: true } }); activeStrategies.push(sniperStrategy); }
       
@@ -350,7 +296,17 @@ export class StrategyOrchestrator {
                 config.payoutRatio = 36 / targetNumbers.length; config.minChipsRequired = targetNumbers.length;
             }
             const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target: lastSignal.target, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED", type: "LIVE" } });
+            await prisma.signal.create({ 
+              data: { 
+                session_id: session.id, 
+                strategy_id: strategy.id, 
+                target: lastSignal.target, 
+                suggested_amount: suggestedAmount, 
+                martingale_step: nextStep, 
+                result: "SUGGESTED", 
+                type: "LIVE" 
+              } 
+            });
             return; 
           }
         }
@@ -406,13 +362,6 @@ export class StrategyOrchestrator {
         }
       }
 
-      const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
-      if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
-          const lastSigTime = new Date(closedCycles[0].created_at).getTime();
-          const spinsSince = recentSpins.filter(s => new Date(s.created_at).getTime() > lastSigTime).length;
-          if (spinsSince < 20) return;
-      }
-
       let candidates: { strategy: Strategy, config: StrategyConfig, zScore: number, requiredZScore: number, markovProb: number, winRate: number }[] = [];
       for (const strategy of activeStrategies) {
         if (strategy.name.includes("Dynamic:")) continue; 
@@ -459,7 +408,17 @@ export class StrategyOrchestrator {
         validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
         const topCandidate = validCandidates[0]; 
         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, topCandidate.config.minChipsRequired, topCandidate.winRate, topCandidate.config.payoutRatio);
-        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target: topCandidate.config.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+        await prisma.signal.create({ 
+          data: { 
+            session_id: session.id, 
+            strategy_id: topCandidate.strategy.id, 
+            target: topCandidate.config.target, 
+            suggested_amount: suggestedAmount, 
+            martingale_step: 0, 
+            result: "SUGGESTED", 
+            type: "LIVE" 
+          } 
+        });
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
