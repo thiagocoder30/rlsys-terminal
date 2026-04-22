@@ -62,7 +62,6 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
     const apiKey = process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
 
-    // PREPARAÇÃO DA CAIXA PRETA (LOGS)
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const logDir = path.join(process.cwd(), "logs", "ocr");
     if (!fs.existsSync(logDir)) {
@@ -103,7 +102,7 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
         numbers = jsonObj.numbers;
       }
     } catch (e) {
-      console.warn("[HAWK-EYE] Parse JSON elegante falhou. Iniciando extração por força bruta (Regex).");
+      console.warn("[HAWK-EYE] Parse JSON falhou, tentando Regex.");
     }
 
     if (numbers.length === 0) {
@@ -115,34 +114,68 @@ app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) =
 
     numbers = numbers.filter(n => !isNaN(n) && n >= 0 && n <= 36);
 
-    // GRAVAÇÃO DA CAIXA PRETA
-    const logContent = `
-=========================================
-CAIXA PRETA OCR - SESSÃO: ${timestamp}
-=========================================
-IMAGEM GRAVADA: ${imagePath}
-
---- TEXTO BRUTO DEVOLVIDO PELA IA (GEMINI) ---
-${rawText}
-
---- ARRAY FINAL EXTRAÍDO PELO CÉREBRO HFT ---
-${JSON.stringify(numbers)}
-=========================================
-    `;
+    const logContent = `OCR LOG - ${timestamp}\nRAW: ${rawText}\nFINAL: ${JSON.stringify(numbers)}`;
     fs.writeFileSync(path.join(logDir, `${timestamp}-log.txt`), logContent);
-    console.log(logContent);
 
-    if (numbers.length < 5) throw new Error("A Inteligência não extraiu números suficientes do print enviado. Verifique o log.");
+    if (numbers.length < 5) throw new Error("Números insuficientes extraídos.");
 
     res.json({ numbers });
   } catch (error: any) {
-    console.error("[HAWK-EYE ERROR]:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ==========================================
-// ROTAS DO HFT E WARM-START
+// NOVAS ROTAS DE SESSÃO (CORREÇÃO TELA BRANCA)
+// ==========================================
+
+// Rota robusta para buscar os dados da sessão que o SessionPage.tsx consome
+app.get("/api/sessions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const session = await prisma.session.findUnique({
+      where: { id },
+      include: {
+        signals: {
+          orderBy: { created_at: "desc" },
+          include: { strategy: true }
+        },
+        spins: {
+          orderBy: { created_at: "desc" },
+          take: 30
+        }
+      }
+    });
+
+    if (!session) return res.status(404).json({ error: "Sessão não encontrada no SQLite." });
+    
+    res.json(session);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Atualização da criação de sessão para garantir números válidos
+app.post("/api/sessions", async (req, res) => {
+  try {
+    const { initial_bankroll, min_chip } = req.body;
+    const session = await prisma.session.create({ 
+      data: { 
+        initial_bankroll: parseFloat(initial_bankroll) || 0, 
+        current_bankroll: parseFloat(initial_bankroll) || 0, 
+        highest_bankroll: parseFloat(initial_bankroll) || 0, 
+        min_chip: parseFloat(min_chip) || 2.5, 
+        status: "ACTIVE" 
+      } 
+    });
+    res.json(session);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// ROTAS DE SIMULAÇÃO E WARM-START
 // ==========================================
 app.get("/api/macro", async (req, res) => {
   try {
@@ -174,16 +207,15 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     const session = await prisma.session.create({ 
       data: { 
-        initial_bankroll, 
-        current_bankroll: initial_bankroll, 
-        highest_bankroll: initial_bankroll, 
-        min_chip, 
+        initial_bankroll: parseFloat(initial_bankroll), 
+        current_bankroll: parseFloat(initial_bankroll), 
+        highest_bankroll: parseFloat(initial_bankroll), 
+        min_chip: parseFloat(min_chip), 
         status: "ACTIVE" 
       } 
     });
 
     const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-
     safeNumbers.reverse();
 
     for (const num of safeNumbers) {
@@ -210,17 +242,8 @@ app.post("/api/sessions/warm-start", async (req, res) => {
 
     res.json({ success: true, session });
   } catch (error: any) { 
-    console.error("[WARM-START ERROR]:", error.message);
     res.status(500).json({ error: error.message }); 
   }
-});
-
-app.post("/api/sessions", async (req, res) => {
-  try {
-    const { initial_bankroll, min_chip } = req.body;
-    const session = await prisma.session.create({ data: { initial_bankroll, current_bankroll: initial_bankroll, highest_bankroll: initial_bankroll, min_chip, status: "ACTIVE" } });
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.get("/api/sessions/:id/dashboard", async (req, res) => {
@@ -238,14 +261,6 @@ app.post("/api/sessions/:id/close", async (req, res) => {
     const session = await prisma.session.update({ where: { id }, data: { status: "CLOSED", closed_at: new Date() } });
     await prisma.signal.updateMany({ where: { session_id: id, result: { in: ["PENDING", "SUGGESTED"] } }, data: { result: "MISSED" } });
     res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.get("/api/sessions/:id/audit", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const auditData = await prisma.session.findUnique({ where: { id }, include: { spins: { orderBy: { created_at: "desc" } }, signals: { include: { strategy: true }, orderBy: { created_at: "desc" } } } });
-    res.json(auditData);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
@@ -273,9 +288,6 @@ app.post("/api/signals/:id/action", async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// ==========================================
-// ROTEAMENTO DE PRODUÇÃO PADRÃO
-// ==========================================
 app.use(express.static(path.join(process.cwd(), "dist")));
 
 app.get("*", (req, res) => {
@@ -284,8 +296,6 @@ app.get("*", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`\n[RL.SYS HFT] Servidor Operacional Iniciado.`);
-  console.log(`[NETWORK] Roteamento ativo na porta: ${PORT}`);
+  console.log(`\n[RL.SYS HFT] Servidor Operacional na porta: ${PORT}`);
   await syncStrategiesToDatabase(prisma);
-  console.log(`[BOOTSTRAP] Rede Neural Carregada com Sucesso.\n`);
 });
