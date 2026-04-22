@@ -1,12 +1,16 @@
 {
-  "name": "react-example",
+  "name": "rl-sys-hft-enterprise",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite & tsx server.ts",
+    "dev:server": "tsx watch server.ts",
+    "dev:client": "vite",
+    "dev": "tsx watch server.ts & vite",
     "build": "vite build",
     "start": "tsx server.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
@@ -49,7 +53,6 @@
     "prisma": "^6.4.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~5.8.2"
   }
 }
