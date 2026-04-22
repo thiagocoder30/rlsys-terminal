@@ -8,29 +8,31 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const app = express();
 
-// Configuração para caminhos de arquivos em ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// --- ROTAS DA API ---
-
-// Rota de Sincronização (A que o SessionPage chama)
+// ROTA DE TELEMETRIA DA SESSÃO
 app.get("/api/sessions/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Busca robusta com inclusão de relações
     const session = await prisma.session.findUnique({
       where: { id },
       include: {
         signals: { include: { strategy: true }, orderBy: { created_at: "desc" } },
-        spins: { orderBy: { created_at: "desc" }, take: 40 }
+        spins: { orderBy: { created_at: "desc" }, take: 50 }
       }
     });
 
-    if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+    if (!session) {
+      return res.status(404).json({ error: "Sessão não localizada no banco." });
+    }
 
+    // Blindagem contra valores nulos (evita tela branca)
     res.json({
       ...session,
       signals: session.signals || [],
@@ -39,32 +41,40 @@ app.get("/api/sessions/:id", async (req, res) => {
       initial_bankroll: Number(session.initial_bankroll || 0)
     });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno no servidor local" });
+    console.error("[API ERROR]:", error);
+    res.status(500).json({ error: "Falha na sincronização de dados." });
   }
 });
 
-// --- SERVINDO O FRONT-END (ESTÁTICOS) ---
-
-// Serve os arquivos da pasta 'dist' (gerada pelo npm run build)
-app.use(express.static(path.join(__dirname, "dist")));
-
-// ROTA CATCH-ALL: Se não for API, entrega o index.html do React
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"), (err) => {
-    if (err) {
-      // Se ainda não houver o build, avisa o desenvolvedor
-      res.status(200).send("Servidor API Ativo. Para ver a interface, acesse a porta do Vite (ex: localhost:5173) ou execute 'npm run build'.");
+// Warm-start (Inicia a mesa)
+app.post("/api/sessions/warm-start", async (req, res) => {
+  try {
+    const { initial_bankroll, min_chip, numbers } = req.body;
+    
+    const session = await prisma.session.create({ 
+      data: { 
+        initial_bankroll: parseFloat(initial_bankroll) || 0, 
+        current_bankroll: parseFloat(initial_bankroll) || 0, 
+        status: "ACTIVE" 
+      } 
+    });
+    
+    // Lógica simplificada de inserção de giros (exemplo)
+    if (numbers && numbers.length > 0) {
+      for (const num of numbers) {
+        await prisma.spin.create({
+          data: { session_id: session.id, number: parseInt(num), color: "BLACK" }
+        });
+      }
     }
-  });
+
+    res.json({ success: true, session });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao iniciar mesa." });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`
-  🚀 [ENTERPRISE SERVER] RODANDO NA PORTA ${PORT}
-  ----------------------------------------------
-  API: http://localhost:${PORT}/api/sessions/[ID]
-  STATUS: Operacional
-  ----------------------------------------------
-  `);
+  console.log(`🚀 BACKEND HFT ATIVO NA PORTA ${PORT}`);
 });
