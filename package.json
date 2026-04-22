@@ -1,16 +1,12 @@
 {
-  "name": "rl-sys-hft-enterprise",
+  "name": "react-example",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev:server": "tsx watch server.ts",
-    "dev:client": "vite",
     "dev": "tsx watch server.ts & vite",
     "build": "vite build",
     "start": "tsx server.ts",
-    "prisma:generate": "prisma generate",
-    "prisma:studio": "prisma studio",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
