@@ -43,13 +43,15 @@ model Strategy {
 }
 
 model Signal {
-  id          String   @id @default(uuid())
-  session_id  String
-  session     Session  @relation(fields: [session_id], references: [id])
-  strategy_id String
-  strategy    Strategy @relation(fields: [strategy_id], references: [id])
-  type        String
-  target      String
-  result      String   // "PENDING", "WIN", "LOSS", "MISSED"
-  created_at  DateTime @default(now())
+  id               String   @id @default(uuid())
+  session_id       String
+  session          Session  @relation(fields: [session_id], references: [id])
+  strategy_id      String
+  strategy         Strategy @relation(fields: [strategy_id], references: [id])
+  type             String
+  target           String
+  suggested_amount Float    // Campo restaurado
+  martingale_step  Int      @default(0) // Campo restaurado
+  result           String   // "PENDING", "WIN", "LOSS", "MISSED", "SUGGESTED"
+  created_at       DateTime @default(now())
 }
