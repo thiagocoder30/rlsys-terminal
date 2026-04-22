@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 interface StrategyConfig {
   payoutRatio: number; 
   coverage: number; 
-  targetBet: string;
+  target: string; // Atualizado para coincidir com o schema
   minChipsRequired: number; 
   checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
@@ -18,44 +18,44 @@ const EUROPEAN_WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 
 
 export class StrategyOrchestrator {
   private static REGISTRY: Record<string, StrategyConfig> = {
-    "Race: Vizinhos 1 & 21": { payoutRatio: 10/26, coverage: 26, minChipsRequired: 26, targetBet: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
-    "Race: Fusion": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "FUSION_MAIS_ZERO", checkWin: (num) => [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26, 0].includes(num) },
-    "Race: P2": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "ESTRATEGIA_P2", checkWin: (num) => [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 29, 30, 31, 32, 34, 35].includes(num) },
-    "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, targetBet: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
+    "Race: Vizinhos 1 & 21": { payoutRatio: 10/26, coverage: 26, minChipsRequired: 26, target: "CUSTOM_RACE_26_NUM", checkWin: (num) => ![3, 7, 8, 11, 12, 13, 28, 29, 30, 35, 36].includes(num) },
+    "Race: Fusion": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "FUSION_MAIS_ZERO", checkWin: (num) => [17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 28, 12, 35, 3, 26, 0].includes(num) },
+    "Race: P2": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "ESTRATEGIA_P2", checkWin: (num) => [0, 1, 2, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 19, 20, 23, 24, 26, 27, 29, 30, 31, 32, 34, 35].includes(num) },
+    "James Bond": { payoutRatio: 8/20, coverage: 25, minChipsRequired: 20, target: "JAMES_BOND_SET", checkWin: (num) => (num >= 13 && num <= 36) || num === 0 },
     
-    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0 },
-    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0 },
-    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0 },
-    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0 },
-    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0 },
-    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, targetBet: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0 },
+    "Cross: D1 ➔ Col 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_2_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 1) || n === 0 },
+    "Cross: D2 ➔ Col 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_1_E_3_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 2) || n === 0 },
+    "Cross: D3 ➔ Col 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "COL_1_E_2_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 3 !== 0) || n === 0 },
+    "Cross: C1 ➔ Duz 2 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_2_E_3_MAIS_ZERO", checkWin: (n) => (n >= 13 && n <= 36) || n === 0 },
+    "Cross: C2 ➔ Duz 1 e 3": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_1_E_3_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 12) || (n >= 25 && n <= 36) || n === 0 },
+    "Cross: C3 ➔ Duz 1 e 2": { payoutRatio: 9/21, coverage: 25, minChipsRequired: 21, target: "DUZ_1_E_2_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 24) || n === 0 },
 
-    "Macro: Red + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "RED_MAIS_ZERO", checkWin: (n) => RED_NUMBERS.includes(n) || n === 0 },
-    "Macro: Black + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "BLACK_MAIS_ZERO", checkWin: (n) => BLACK_NUMBERS.includes(n) || n === 0 },
-    "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
-    "Macro: Odd + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "ODD_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 !== 0) || n === 0 },
-    "Hedge: Red + Col 2 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_RED_COL2", checkWin: (n) => RED_NUMBERS.includes(n) || (n % 3 === 2) || n === 0 },
-    "Hedge: Black + Col 3 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, targetBet: "HEDGE_BLACK_COL3", checkWin: (n) => BLACK_NUMBERS.includes(n) || (n % 3 === 0) || n === 0 },
-    "Macro: Low (1-18) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "LOW_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 18) || n === 0 },
-    "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, targetBet: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
-    "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, targetBet: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
-    "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, targetBet: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
+    "Macro: Red + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "RED_MAIS_ZERO", checkWin: (n) => RED_NUMBERS.includes(n) || n === 0 },
+    "Macro: Black + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "BLACK_MAIS_ZERO", checkWin: (n) => BLACK_NUMBERS.includes(n) || n === 0 },
+    "Macro: Even + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "EVEN_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 === 0) || n === 0 },
+    "Macro: Odd + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "ODD_MAIS_ZERO", checkWin: (n) => (n !== 0 && n % 2 !== 0) || n === 0 },
+    "Hedge: Red + Col 2 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, target: "HEDGE_RED_COL2", checkWin: (n) => RED_NUMBERS.includes(n) || (n % 3 === 2) || n === 0 },
+    "Hedge: Black + Col 3 + Zero": { payoutRatio: 9/27, coverage: 27, minChipsRequired: 27, target: "HEDGE_BLACK_COL3", checkWin: (n) => BLACK_NUMBERS.includes(n) || (n % 3 === 0) || n === 0 },
+    "Macro: Low (1-18) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "LOW_MAIS_ZERO", checkWin: (n) => (n >= 1 && n <= 18) || n === 0 },
+    "Macro: High (19-36) + Zero": { payoutRatio: 17/19, coverage: 19, minChipsRequired: 19, target: "HIGH_MAIS_ZERO", checkWin: (n) => (n >= 19 && n <= 36) || n === 0 },
+    "Race: Sector Alpha": { payoutRatio: 11/25, coverage: 25, minChipsRequired: 25, target: "VOISINS_AND_ORPHELINS", checkWin: (n) => [22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25,1,20,14,31,9,6,34,17].includes(n) },
+    "Race: Sector Omega": { payoutRatio: 15/21, coverage: 21, minChipsRequired: 21, target: "TIERS_ORPHELINS_ZERO", checkWin: (n) => [27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,6,34,17,0].includes(n) },
     
     // Matrizes Dinâmicas HFT
-    "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "DROP_ZONE", checkWin: () => false },
-    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, targetBet: "HEATMAP_CLUSTER", checkWin: () => false },
-    "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, targetBet: "SNIPER_ANOMALY", checkWin: () => false },
-    "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, targetBet: "QUANTUM_INTERSECTION", checkWin: () => false },
-    "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, targetBet: "MIDDLE_SIX_LINES", checkWin: () => false },
-    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 18, minChipsRequired: 18, targetBet: "SHOTGUN_STRIKE_V2", checkWin: () => false },
-    "Dynamic: Terminais Altos": { payoutRatio: 4.0, coverage: 9, minChipsRequired: 9, targetBet: "TERMINAIS_ALTOS", checkWin: () => false }
+    "Dynamic: Drop Zone": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, target: "DROP_ZONE", checkWin: () => false },
+    "Dynamic: Heatmap Cluster": { payoutRatio: 31/5, coverage: 5, minChipsRequired: 5, target: "HEATMAP_CLUSTER", checkWin: () => false },
+    "Dynamic: Sniper Anomaly": { payoutRatio: 2.0, coverage: 12, minChipsRequired: 1, target: "SNIPER_ANOMALY", checkWin: () => false },
+    "Dynamic: Quantum Intersection": { payoutRatio: 36, coverage: 1, minChipsRequired: 1, target: "QUANTUM_INTERSECTION", checkWin: () => false },
+    "Dynamic: Rolo Compressor": { payoutRatio: 1.2, coverage: 30, minChipsRequired: 5, target: "MIDDLE_SIX_LINES", checkWin: () => false },
+    "Dynamic: Operacao Tridente": { payoutRatio: 4.0, coverage: 18, minChipsRequired: 18, target: "SHOTGUN_STRIKE_V2", checkWin: () => false },
+    "Dynamic: Terminais Altos": { payoutRatio: 4.0, coverage: 9, minChipsRequired: 9, target: "TERMINAIS_ALTOS", checkWin: () => false }
   };
 
   public static getConfig(strategyName: string): StrategyConfig {
     for (const [key, config] of Object.entries(this.REGISTRY)) {
       if (strategyName.includes(key)) return config;
     }
-    return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
+    return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, target: "UNKNOWN", checkWin: () => false };
   }
 
   public static getNeighbors(center: number, distance: number = 1): number[] {
@@ -240,7 +240,7 @@ export class StrategyOrchestrator {
         } else if (sig.result === "PENDING") {
           let isWin = false; let payoutR = 1.0; const config = this.getConfig(sig.strategy.name);
           if (sig.strategy.name === "Dynamic: Drop Zone" || sig.strategy.name === "Dynamic: Heatmap Cluster") {
-             const targetStr = sig.target_bet.split("_").pop(); 
+             const targetStr = sig.target.split("_").pop(); 
              if (targetStr) {
                  const targetNum = parseInt(targetStr); const targetIndex = EUROPEAN_WHEEL.indexOf(targetNum);
                  const winningSet = [EUROPEAN_WHEEL[(targetIndex - 2 + 37) % 37], EUROPEAN_WHEEL[(targetIndex - 1 + 37) % 37], targetNum, EUROPEAN_WHEEL[(targetIndex + 1) % 37], EUROPEAN_WHEEL[(targetIndex + 2) % 37]];
@@ -248,7 +248,7 @@ export class StrategyOrchestrator {
              }
              payoutR = config.payoutRatio;
           } else if (sig.strategy.name === "Dynamic: Sniper Anomaly") {
-             const target = sig.target_bet;
+             const target = sig.target;
              if (target === "SNIPER_DUZ_1") isWin = newNumber >= 1 && newNumber <= 12;
              else if (target === "SNIPER_DUZ_2") isWin = newNumber >= 13 && newNumber <= 24;
              else if (target === "SNIPER_DUZ_3") isWin = newNumber >= 25 && newNumber <= 36;
@@ -259,17 +259,17 @@ export class StrategyOrchestrator {
              else if (target === "SNIPER_BLACK_ZERO") isWin = BLACK_NUMBERS.includes(newNumber) || newNumber === 0;
              payoutR = target.includes("ZERO") ? 17/19 : 2.0;
           } else if (sig.strategy.name === "Dynamic: Quantum Intersection") {
-             const numbersStr = sig.target_bet.replace("INTERSECTION_", "");
+             const numbersStr = sig.target.replace("INTERSECTION_", "");
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else if (sig.strategy.name === "Dynamic: Rolo Compressor") {
              isWin = newNumber >= 4 && newNumber <= 33; payoutR = 1.2; 
           } else if (sig.strategy.name === "Dynamic: Operacao Tridente") {
-             const numbersStr = sig.target_bet.replace("TRIDENT_", "");
+             const numbersStr = sig.target.replace("TRIDENT_", "");
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else if (sig.strategy.name === "Dynamic: Terminais Altos") {
-             const numbersStr = sig.target_bet.replace("TERMINALS_", "");
+             const numbersStr = sig.target.replace("TERMINALS_", "");
              const targetNumbers = numbersStr.split("-").map(n => parseInt(n));
              isWin = targetNumbers.includes(newNumber); payoutR = 36 / targetNumbers.length;
           } else {
@@ -337,20 +337,20 @@ export class StrategyOrchestrator {
             }
             let config = this.getConfig(strategy.name);
             if (strategy.name === "Dynamic: Sniper Anomaly") {
-                config.payoutRatio = lastSignal.target_bet.includes("ZERO") ? 17/19 : 2.0;
-                config.minChipsRequired = lastSignal.target_bet.includes("ZERO") ? 19 : 1;
+                config.payoutRatio = lastSignal.target.includes("ZERO") ? 17/19 : 2.0;
+                config.minChipsRequired = lastSignal.target.includes("ZERO") ? 19 : 1;
             } else if (strategy.name === "Dynamic: Quantum Intersection") {
-                const targetNumbers = lastSignal.target_bet.replace("INTERSECTION_", "").split("-").map(n => parseInt(n));
+                const targetNumbers = lastSignal.target.replace("INTERSECTION_", "").split("-").map(n => parseInt(n));
                 config.payoutRatio = 36 / targetNumbers.length; config.minChipsRequired = targetNumbers.length;
             } else if (strategy.name === "Dynamic: Operacao Tridente") {
-                const targetNumbers = lastSignal.target_bet.replace("TRIDENT_", "").split("-").map(n => parseInt(n));
+                const targetNumbers = lastSignal.target.replace("TRIDENT_", "").split("-").map(n => parseInt(n));
                 config.payoutRatio = 36 / targetNumbers.length; config.minChipsRequired = targetNumbers.length;
             } else if (strategy.name === "Dynamic: Terminais Altos") {
-                const targetNumbers = lastSignal.target_bet.replace("TERMINALS_", "").split("-").map(n => parseInt(n));
+                const targetNumbers = lastSignal.target.replace("TERMINALS_", "").split("-").map(n => parseInt(n));
                 config.payoutRatio = 36 / targetNumbers.length; config.minChipsRequired = targetNumbers.length;
             }
             const suggestedAmount = this.calculateRecoveryBet(accLoss, config, session.min_chip, session.current_bankroll);
-            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target_bet: lastSignal.target_bet, target: lastSignal.target, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED", type: "LIVE" } });
+            await prisma.signal.create({ data: { session_id: session.id, strategy_id: strategy.id, target: lastSignal.target, suggested_amount: suggestedAmount, martingale_step: nextStep, result: "SUGGESTED", type: "LIVE" } });
             return; 
           }
         }
@@ -373,7 +373,7 @@ export class StrategyOrchestrator {
         const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
         if (sniperAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, sniperAnomaly.chips, 95, sniperAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target_bet: sniperAnomaly.target, target: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: sniperStrategy.id, target: sniperAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -382,7 +382,7 @@ export class StrategyOrchestrator {
         const roloAnomaly = this.detectRoloCompressor(spinNumbersTimeline);
         if (roloAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, roloAnomaly.chips, 81.08, roloAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target_bet: roloAnomaly.target, target: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: roloStrategy.id, target: roloAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -391,7 +391,7 @@ export class StrategyOrchestrator {
         const tridenteAnomaly = this.detectOperacaoTridente(spinNumbersTimeline);
         if (tridenteAnomaly !== null) {
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, tridenteAnomaly.chips, 48.6, tridenteAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target_bet: tridenteAnomaly.target, target: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: tridenteStrategy.id, target: tridenteAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -401,7 +401,7 @@ export class StrategyOrchestrator {
         if (termAnomaly !== null) {
            const winRate = (termAnomaly.chips / 37) * 100;
            const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, termAnomaly.chips, winRate, termAnomaly.payout);
-           await prisma.signal.create({ data: { session_id: session.id, strategy_id: terminaisStrategy.id, target_bet: termAnomaly.target, target: termAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+           await prisma.signal.create({ data: { session_id: session.id, strategy_id: terminaisStrategy.id, target: termAnomaly.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
            return;
         }
       }
@@ -449,7 +449,7 @@ export class StrategyOrchestrator {
           const targetStr = `INTERSECTION_${intersectionNumbers.join("-")}`;
           const exactBetAmount = session.min_chip * intersectionNumbers.length;
           await prisma.signal.create({ 
-            data: { session_id: session.id, strategy_id: quantumStrategy.id, target_bet: targetStr, target: "QUANTUM", suggested_amount: exactBetAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } 
+            data: { session_id: session.id, strategy_id: quantumStrategy.id, target: targetStr, suggested_amount: exactBetAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } 
           });
           return; 
         }
@@ -459,7 +459,7 @@ export class StrategyOrchestrator {
         validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
         const topCandidate = validCandidates[0]; 
         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, topCandidate.config.minChipsRequired, topCandidate.winRate, topCandidate.config.payoutRatio);
-        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target_bet: topCandidate.config.targetBet, target: topCandidate.config.targetBet, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
+        await prisma.signal.create({ data: { session_id: session.id, strategy_id: topCandidate.strategy.id, target: topCandidate.config.target, suggested_amount: suggestedAmount, martingale_step: 0, result: "SUGGESTED", type: "LIVE" } });
       }
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro na Análise Tática: ${error.message}`); }
   }
