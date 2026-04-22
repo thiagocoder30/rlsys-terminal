@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ROTA PARA BUSCAR DADOS DA SESSÃO
+// ROTA DE SINCRONIZAÇÃO DA SESSÃO
 app.get("/api/sessions/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -21,7 +21,7 @@ app.get("/api/sessions/:id", async (req, res) => {
       }
     });
 
-    if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+    if (!session) return res.status(404).json({ error: "Sessão não localizada." });
 
     res.json({
       ...session,
@@ -30,15 +30,13 @@ app.get("/api/sessions/:id", async (req, res) => {
       current_bankroll: Number(session.current_bankroll || 0)
     });
   } catch (error) {
-    res.status(500).json({ error: "Erro interno no servidor" });
+    res.status(500).json({ error: "Erro de sincronização." });
   }
 });
 
-// ROTA DE INICIALIZAÇÃO (WARM-START)
 app.post("/api/sessions/warm-start", async (req, res) => {
   try {
-    const { initial_bankroll, numbers } = req.body;
-
+    const { initial_bankroll } = req.body;
     const session = await prisma.session.create({
       data: {
         initial_bankroll: parseFloat(initial_bankroll) || 100,
@@ -46,12 +44,14 @@ app.post("/api/sessions/warm-start", async (req, res) => {
         status: "ACTIVE"
       }
     });
-
     res.json({ success: true, session });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao criar sessão" });
+    res.status(500).json({ error: "Erro ao criar sessão." });
   }
 });
 
+// ESCUTANDO EM 127.0.0.1 PARA EVITAR PERMISSÕES DE REDE NO ANDROID
 const PORT = 3000;
-app.listen(PORT, () => console.log(`Backend rodando na porta ${PORT}`));
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`🚀 [SERVER] Ativo em http://127.0.0.1:${PORT}`);
+});
