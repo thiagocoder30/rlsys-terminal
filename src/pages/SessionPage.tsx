@@ -9,15 +9,13 @@ export const SessionPage: React.FC = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      // Rota relativa utilizando o Proxy do Vite
       const response = await fetch(`/api/sessions/${id}`);
-      if (!response.ok) throw new Error("Offline");
+      if (!response.ok) throw new Error("Erro na API");
       const json = await response.json();
-      
       setData(json);
       setLoading(false);
     } catch (err) {
-      console.warn("[HFT-SYNC] Tentando reconectar ao banco local...");
+      console.warn("Tentando reconectar...");
     }
   }, [id]);
 
@@ -29,47 +27,45 @@ export const SessionPage: React.FC = () => {
 
   if (loading || !data) {
     return (
-      <div className="h-screen bg-[#070B14] flex flex-col items-center justify-center text-blue-500 font-sans">
+      <div className="h-screen bg-[#070B14] flex flex-col items-center justify-center text-blue-500 p-6">
         <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-6"></div>
-        <p className="animate-pulse tracking-[0.3em] uppercase text-[10px] font-black">Sincronizando DB...</p>
+        <p className="animate-pulse tracking-widest uppercase text-xs font-black">Sincronizando DB...</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-8 text-[10px] text-slate-500 border border-slate-800 px-4 py-2 rounded"
+        >
+          REPETIR CONEXÃO
+        </button>
       </div>
     );
   }
 
-  const spins = data?.spins ?? [];
-  const signals = data?.signals ?? [];
-
   return (
-    <div className="min-h-screen bg-[#070B14] text-white p-6">
-      <div className="max-w-5xl mx-auto flex justify-between items-end mb-10">
-        <h1 className="text-2xl font-black tracking-tighter">RL.SYS <span className="text-blue-500">HFT</span></h1>
-        <p className="text-2xl font-mono text-emerald-400">R$ {data.current_bankroll.toFixed(2)}</p>
+    <div className="min-h-screen bg-[#070B14] text-white p-6 font-sans">
+      <div className="flex justify-between items-center mb-10">
+        <h1 className="font-black text-xl italic">RL.SYS <span className="text-blue-500">HFT</span></h1>
+        <div className="text-right">
+          <p className="text-[10px] text-slate-500 uppercase font-bold">Banca</p>
+          <p className="text-xl font-mono font-bold text-emerald-400">R$ {data.current_bankroll.toFixed(2)}</p>
+        </div>
       </div>
 
-      <div className="max-w-5xl mx-auto bg-[#0D1424] p-4 rounded-xl flex gap-3 overflow-x-auto mb-10">
-        {spins.map((s: any, idx: number) => (
-          <div key={idx} className="w-12 h-12 bg-slate-800 flex items-center justify-center rounded-lg font-bold">
+      <div className="bg-[#0D1424] p-4 rounded-xl flex gap-2 overflow-x-auto mb-8">
+        {(data.spins || []).slice(0, 10).map((s: any, i: number) => (
+          <div key={i} className="flex-shrink-0 w-10 h-10 bg-slate-800 rounded flex items-center justify-center font-bold text-sm">
             {s.number}
           </div>
         ))}
       </div>
 
-      <div className="max-w-5xl mx-auto grid gap-4">
-        {signals.length > 0 ? (
-          signals.map((sig: any) => (
-            <div key={sig.id} className="bg-blue-600/10 border border-blue-500/30 p-6 rounded-2xl flex justify-between">
-              <span className="text-3xl font-black">{sig.target}</span>
-              <span className="text-xl font-mono">R$ {sig.suggested_amount.toFixed(2)}</span>
-            </div>
-          ))
-        ) : (
-          <p className="text-center text-slate-500 uppercase text-xs tracking-widest py-10">Aguardando Padrões...</p>
-        )}
+      <div className="grid gap-4">
+        {(data.signals || []).filter((sig: any) => sig.result === "PENDING").map((sig: any) => (
+          <div key={sig.id} className="bg-blue-600/10 border border-blue-500/30 p-5 rounded-2xl flex justify-between items-center">
+            <span className="text-2xl font-black">{sig.target}</span>
+            <span className="text-lg font-mono">R$ {sig.suggested_amount.toFixed(2)}</span>
+          </div>
+        ))}
       </div>
-
-      <button onClick={() => navigate('/')} className="mt-10 block mx-auto text-slate-600 text-[10px] uppercase font-bold">
-        Finalizar Sessão
-      </button>
     </div>
   );
 };
