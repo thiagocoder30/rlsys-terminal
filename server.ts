@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ROTA DE SINCRONIZAÇÃO DA SESSÃO
+// ROTA DE SINCRONIZAÇÃO
 app.get("/api/sessions/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -21,7 +21,7 @@ app.get("/api/sessions/:id", async (req, res) => {
       }
     });
 
-    if (!session) return res.status(404).json({ error: "Sessão não localizada." });
+    if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
 
     res.json({
       ...session,
@@ -30,7 +30,7 @@ app.get("/api/sessions/:id", async (req, res) => {
       current_bankroll: Number(session.current_bankroll || 0)
     });
   } catch (error) {
-    res.status(500).json({ error: "Erro de sincronização." });
+    res.status(500).json({ error: "Erro de sincronização" });
   }
 });
 
@@ -46,12 +46,14 @@ app.post("/api/sessions/warm-start", async (req, res) => {
     });
     res.json({ success: true, session });
   } catch (error) {
-    res.status(500).json({ error: "Erro ao criar sessão." });
+    res.status(500).json({ error: "Erro ao iniciar" });
   }
 });
 
-// ESCUTANDO EM 127.0.0.1 PARA EVITAR PERMISSÕES DE REDE NO ANDROID
-const PORT = 3000;
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`🚀 [SERVER] Ativo em http://127.0.0.1:${PORT}`);
+// MUDANÇA ESTRATÉGICA PARA PORTA 3001 (EVITA EADDRINUSE)
+const PORT = 3001; 
+const HOST = '127.0.0.1';
+
+app.listen(PORT, HOST, () => {
+  console.log(`✅ SERVER ONLINE NA NOVA PORTA: http://${HOST}:${PORT}`);
 });
