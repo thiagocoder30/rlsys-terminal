@@ -4,8 +4,11 @@ import { BankrollManager } from "./BankrollManager";
 const prisma = new PrismaClient();
 
 interface StrategyConfig {
-  payoutRatio: number; coverage: number; targetBet: string;
-  minChipsRequired: number; checkWin: (num: number) => boolean;
+  payoutRatio: number; 
+  coverage: number; 
+  targetBet: string;
+  minChipsRequired: number; 
+  checkWin: (num: number) => boolean;
   canTrigger?: (history: number[]) => boolean; 
 }
 
@@ -55,10 +58,6 @@ export class StrategyOrchestrator {
     return { payoutRatio: 1.0, coverage: 1, minChipsRequired: 1, targetBet: "UNKNOWN", checkWin: () => false };
   }
 
-  // ==========================================
-  // RADARES TÁTICOS HFT E FILTROS DINÂMICOS
-  // ==========================================
-  
   public static getNeighbors(center: number, distance: number = 1): number[] {
     const idx = EUROPEAN_WHEEL.indexOf(center);
     if (idx === -1) return [];
@@ -69,14 +68,12 @@ export class StrategyOrchestrator {
     return res;
   }
 
-  // NOVA TÁTICA: RASTREADOR DE TERMINAIS ALTOS CONDICIONAL
   public static detectTerminaisAltos(history: number[]): { target: string, chips: number, payout: number } | null {
     if (history.length < 12) return null;
     
     const recent12 = history.slice(0, 12);
     let has7 = false, has8 = false, has9 = false;
 
-    // Escaneia os últimos 12 giros verificando a presença dos terminais 7, 8 e 9
     recent12.forEach(n => {
         const term = n % 10;
         if (term === 7) has7 = true;
@@ -86,18 +83,15 @@ export class StrategyOrchestrator {
 
     let targets: number[] = [];
 
-    // Condição A: Todos ausentes -> Ataca os 3 terminais altos
     if (!has7 && !has8 && !has9) {
         targets = [7, 17, 27, 8, 18, 28, 9, 19, 29];
     } 
-    // Condição B: Algum ausente -> Ataca os ausentes + os terminais Zero
     else if (!has7 || !has8 || !has9) {
         if (!has7) targets.push(7, 17, 27);
         if (!has8) targets.push(8, 18, 28);
         if (!has9) targets.push(9, 19, 29);
         targets.push(0, 10, 20, 30);
     } 
-    // Condição C: Todos presentes -> Atraso não confirmado, abortar.
     else {
         return null; 
     }
@@ -257,9 +251,6 @@ export class StrategyOrchestrator {
     return steps * absoluteMinBet;
   }
 
-  // ==========================================
-  // RESOLUÇÃO DE RESULTADOS
-  // ==========================================
   public static async resolvePendingSignals(newNumber: number, sessionId: string) {
     try {
       const activeSignals = await prisma.signal.findMany({ where: { session_id: sessionId, result: { in: ["PENDING", "SUGGESTED"] } }, include: { strategy: true } });
@@ -320,10 +311,6 @@ export class StrategyOrchestrator {
           const profitNet = isWin ? (sig.suggested_amount * payoutR) : -sig.suggested_amount;
           totalProfitDelta += profitNet;
           await prisma.signal.update({ where: { id: sig.id }, data: { result: isWin ? "WIN" : "LOSS" }});
-
-          let newWeight = sig.strategy.bayes_weight + (isWin ? 0.05 : -0.15);
-          newWeight = Math.max(0.5, Math.min(newWeight, 2.5));
-          await prisma.strategy.update({ where: { id: sig.strategy.id }, data: { bayes_weight: newWeight }});
         }
       }
 
@@ -338,38 +325,34 @@ export class StrategyOrchestrator {
     } catch (error: any) { console.error(`[FAIL-SAFE] Erro ao resolver sinais: ${error.message}`); }
   }
 
-  // ==========================================
-  // ANÁLISE DO MERCADO E GERAÇÃO DE SINAIS
-  // ==========================================
   public static async analyzeMarket(recentSpins: Spin[], activeStrategies: Strategy[], session: Session) {
     try {
       const spinNumbersTimeline = recentSpins.map(s => s.number);
       if (spinNumbersTimeline.length < 10) return; 
 
       const entropy = this.calculateShannonEntropy(spinNumbersTimeline);
-      if (entropy > 4.60) return; // Caos absoluto. Bloqueia novas operações.
+      if (entropy > 4.60) return; 
 
       const allSignals = await prisma.signal.findMany({ where: { session_id: session.id }, orderBy: { created_at: "desc" } });
 
       let heatStrategy = activeStrategies.find(s => s.name === "Dynamic: Heatmap Cluster");
-      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", bayes_weight: 1.0, is_active: true } }); activeStrategies.push(heatStrategy); }
+      if (!heatStrategy) { heatStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Heatmap Cluster", description: "Ataca clusters físicos", is_active: true } }); activeStrategies.push(heatStrategy); }
       
       let sniperStrategy = activeStrategies.find(s => s.name === "Dynamic: Sniper Anomaly");
-      if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(sniperStrategy); }
+      if (!sniperStrategy) { sniperStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Sniper Anomaly", description: "Explora reversão à média", is_active: true } }); activeStrategies.push(sniperStrategy); }
       
       let quantumStrategy = activeStrategies.find(s => s.name === "Dynamic: Quantum Intersection");
-      if (!quantumStrategy) { quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção", bayes_weight: 2.0, is_active: true } }); activeStrategies.push(quantumStrategy); }
+      if (!quantumStrategy) { quantumStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Quantum Intersection", description: "Aposta Plein em interseção", is_active: true } }); activeStrategies.push(quantumStrategy); }
 
       let roloStrategy = activeStrategies.find(s => s.name === "Dynamic: Rolo Compressor");
-      if (!roloStrategy) { roloStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Rolo Compressor", description: "Cerco agressivo central (Six Lines)", bayes_weight: 1.2, is_active: true } }); activeStrategies.push(roloStrategy); }
+      if (!roloStrategy) { roloStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Rolo Compressor", description: "Cerco agressivo central (Six Lines)", is_active: true } }); activeStrategies.push(roloStrategy); }
 
       let tridenteStrategy = activeStrategies.find(s => s.name === "Dynamic: Operacao Tridente");
-      if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão dupla", bayes_weight: 1.5, is_active: true } }); activeStrategies.push(tridenteStrategy); }
+      if (!tridenteStrategy) { tridenteStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Operacao Tridente", description: "Ataque dinâmico de dispersão dupla", is_active: true } }); activeStrategies.push(tridenteStrategy); }
 
       let terminaisStrategy = activeStrategies.find(s => s.name === "Dynamic: Terminais Altos");
-      if (!terminaisStrategy) { terminaisStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Terminais Altos", description: "Rastreador de atraso de terminais (Hit & Run)", bayes_weight: 1.8, is_active: true } }); activeStrategies.push(terminaisStrategy); }
+      if (!terminaisStrategy) { terminaisStrategy = await prisma.strategy.create({ data: { name: "Dynamic: Terminais Altos", description: "Rastreador de atraso de terminais (Hit & Run)", is_active: true } }); activeStrategies.push(terminaisStrategy); }
 
-      // 1. VERIFICAÇÃO DE GALE (Recuperação)
       for (const strategy of activeStrategies) {
         const strategySignals = allSignals.filter(s => s.strategy_id === strategy.id);
         const lastSignal = strategySignals.length > 0 ? strategySignals[0] : null;
@@ -417,9 +400,6 @@ export class StrategyOrchestrator {
       const anyActive = allSignals.some(s => s.result === "PENDING" || s.result === "SUGGESTED");
       if (anyActive) return; 
 
-      // ==========================================
-      // NOVO MOTOR DE COOLDOWN (TRAVA HIT AND RUN)
-      // ==========================================
       const isOnCooldown = (strategyId: string, winDelay: number, lossDelay: number) => {
         const stratSignals = allSignals.filter(s => s.strategy_id === strategyId);
         const lastSig = stratSignals.length > 0 ? stratSignals[0] : null;
@@ -434,7 +414,6 @@ export class StrategyOrchestrator {
         return spinsSince < required;
       };
 
-      // 2. DETECÇÃO TÁTICA SUPREMA (Com freio tático de 3 giros na vitória e 15 na derrota)
       if (sniperStrategy && !isOnCooldown(sniperStrategy.id, 3, 15)) {
         const sniperAnomaly = this.detectSniperAnomaly(spinNumbersTimeline);
         if (sniperAnomaly !== null) {
@@ -472,7 +451,6 @@ export class StrategyOrchestrator {
         }
       }
 
-      // 3. DETECÇÃO TÁTICA DE MATRIZES PADRÃO (Legado)
       const closedCycles = allSignals.filter(s => s.result === "WIN" || (s.result === "LOSS" && s.martingale_step === 1));
       if (closedCycles.length >= 2 && closedCycles[0].result === "LOSS" && closedCycles[1].result === "LOSS") {
           const lastSigTime = new Date(closedCycles[0].created_at).getTime();
@@ -534,7 +512,7 @@ export class StrategyOrchestrator {
       }
 
       if (validCandidates.length > 0) {
-        validCandidates.sort((a, b) => ((a.zScore - a.markovProb) * a.strategy.bayes_weight) - ((b.zScore - b.markovProb) * b.strategy.bayes_weight));
+        validCandidates.sort((a, b) => (a.zScore - a.markovProb) - (b.zScore - b.markovProb));
         const topCandidate = validCandidates[0]; 
         const suggestedAmount = BankrollManager.calculateSafeBet(session.current_bankroll, session.min_chip, topCandidate.config.minChipsRequired, topCandidate.winRate, topCandidate.config.payoutRatio);
 
