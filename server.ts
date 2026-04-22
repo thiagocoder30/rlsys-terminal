@@ -2,163 +2,70 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "path";
-import multer from "multer";
-import fs from "fs";
 import { PrismaClient } from "@prisma/client";
 import { StrategyOrchestrator } from "./src/services/StrategyOrchestrator";
-import { SimulationEngine } from "./src/services/SimulationEngine";
 import { syncStrategiesToDatabase } from "./src/services/StrategyBootstrapper";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const prisma = new PrismaClient();
 const app = express();
 
-const upload = multer({ storage: multer.memoryStorage() });
-
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true }));
 
-// ==========================================
-// FUNÇÕES TÁTICAS: O PINTOR ALGORÍTMICO COMPLETO
-// ==========================================
-function getNumberColor(num: number): string {
+// HELPER: Cores da Roleta
+const getNumberColor = (num: number) => {
   if (num === 0) return "GREEN";
-  const reds = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
-  return reds.includes(num) ? "RED" : "BLACK";
-}
-
-function getNumberParity(num: number): string {
-  if (num === 0) return "ZERO";
-  return num % 2 === 0 ? "EVEN" : "ODD";
-}
-
-function getNumberDozen(num: number): string {
-  if (num === 0) return "ZERO";
-  if (num <= 12) return "1";
-  if (num <= 24) return "2";
-  return "3";
-}
-
-function getNumberColumn(num: number): string {
-  if (num === 0) return "ZERO";
-  if (num % 3 === 1) return "1";
-  if (num % 3 === 2) return "2";
-  return "3";
-}
-
-function getNumberHalf(num: number): string {
-  if (num === 0) return "ZERO";
-  return num <= 18 ? "1" : "2";
-}
+  return [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36].includes(num) ? "RED" : "BLACK";
+};
 
 // ==========================================
-// A NOVA ROTA: HAWK-EYE OCR ON-DEMAND (LABORATÓRIO)
+// ROTA DE SESSÃO ENTERPRISE (ANTI-CRASH)
 // ==========================================
-app.post("/api/vision/analyze-table", upload.single("image"), async (req, res) => {
-  try {
-    if (!req.file) throw new Error("Comandante, o arquivo de imagem não chegou ao servidor.");
-
-    const apiKey = process.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Chave da API ausente no arquivo .env.");
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const logDir = path.join(process.cwd(), "logs", "ocr");
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    const imagePath = path.join(logDir, `${timestamp}-image.jpg`);
-    fs.writeFileSync(imagePath, req.file.buffer);
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3-flash-preview",
-      generationConfig: { temperature: 0.0, maxOutputTokens: 8192, responseMimeType: "text/plain" }
-    });
-
-    const result = await model.generateContent([
-      `You are a highly precise OCR for a roulette game.
-      CRITICAL INSTRUCTIONS:
-      1. Analyze the provided image, which contains a history of recently drawn roulette numbers.
-      2. Extract ALL the numbers you see in this grid. Read them row by row, from left to right, top to bottom.
-      3. Ignore text like "ÚLTIMOS 500", "QUENTE E FRIO", IDs, or balances.
-      Return ONLY a JSON array like this: {"numbers": [int, int, ...]}`,
-      {
-        inlineData: {
-          data: req.file.buffer.toString("base64"),
-          mimeType: req.file.mimetype
-        }
-      }
-    ]);
-
-    const rawText = result.response.text();
-    let numbers: number[] = [];
-
-    try {
-      const cleanText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-      const jsonObj = JSON.parse(cleanText);
-      if (jsonObj.numbers && Array.isArray(jsonObj.numbers)) {
-        numbers = jsonObj.numbers;
-      }
-    } catch (e) {
-      console.warn("[HAWK-EYE] Parse JSON falhou, tentando Regex.");
-    }
-
-    if (numbers.length === 0) {
-      const matches = rawText.match(/\b\d{1,2}\b/g);
-      if (matches) {
-        numbers = matches.map(n => parseInt(n, 10));
-      }
-    }
-
-    numbers = numbers.filter(n => !isNaN(n) && n >= 0 && n <= 36);
-
-    const logContent = `OCR LOG - ${timestamp}\nRAW: ${rawText}\nFINAL: ${JSON.stringify(numbers)}`;
-    fs.writeFileSync(path.join(logDir, `${timestamp}-log.txt`), logContent);
-
-    if (numbers.length < 5) throw new Error("Números insuficientes extraídos.");
-
-    res.json({ numbers });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==========================================
-// NOVAS ROTAS DE SESSÃO (CORREÇÃO TELA BRANCA)
-// ==========================================
-
-// Rota robusta para buscar os dados da sessão que o SessionPage.tsx consome
 app.get("/api/sessions/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const session = await prisma.session.findUnique({
       where: { id },
       include: {
-        signals: {
-          orderBy: { created_at: "desc" },
-          include: { strategy: true }
-        },
-        spins: {
-          orderBy: { created_at: "desc" },
-          take: 30
-        }
+        signals: { include: { strategy: true }, orderBy: { created_at: "desc" } },
+        spins: { orderBy: { created_at: "desc" }, take: 40 }
       }
     });
 
-    if (!session) return res.status(404).json({ error: "Sessão não encontrada no SQLite." });
-    
-    res.json(session);
+    if (!session) {
+      return res.status(404).json({ error: "Sessão não localizada no banco local." });
+    }
+
+    // SANITIZAÇÃO: Garante que o Front-end receba arrays, nunca null/undefined
+    const enterpriseData = {
+      ...session,
+      signals: session.signals || [],
+      spins: session.spins || [],
+      current_bankroll: Number(session.current_bankroll || 0),
+      initial_bankroll: Number(session.initial_bankroll || 0)
+    };
+
+    res.json(enterpriseData);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[SERVER ERROR]:", error.message);
+    res.status(500).json({ error: "Erro na integridade dos dados locais." });
   }
 });
 
-// Atualização da criação de sessão para garantir números válidos
-app.post("/api/sessions", async (req, res) => {
+// ==========================================
+// WARM-START (INICIALIZAÇÃO DA MESA)
+// ==========================================
+app.post("/api/sessions/warm-start", async (req, res) => {
   try {
-    const { initial_bankroll, min_chip } = req.body;
+    const { initial_bankroll, min_chip, numbers } = req.body;
+
+    // Fecha sessões anteriores
+    await prisma.session.updateMany({
+      where: { status: "ACTIVE" },
+      data: { status: "CLOSED", closed_at: new Date() }
+    });
+
+    // Cria nova sessão com valores garantidos
     const session = await prisma.session.create({ 
       data: { 
         initial_bankroll: parseFloat(initial_bankroll) || 0, 
@@ -168,77 +75,23 @@ app.post("/api/sessions", async (req, res) => {
         status: "ACTIVE" 
       } 
     });
-    res.json(session);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
-// ==========================================
-// ROTAS DE SIMULAÇÃO E WARM-START
-// ==========================================
-app.get("/api/macro", async (req, res) => {
-  try {
-    const sessions = await prisma.session.findMany({ where: { status: "CLOSED" }, orderBy: { created_at: "desc" } });
-    let totalProfit = 0; sessions.forEach(s => { totalProfit += (s.current_bankroll - s.initial_bankroll); });
-    res.json({ totalProfit, totalSessions: sessions.length, sessions });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/simulate", async (req, res) => {
-  try {
-    const { numbers, initial_bankroll, min_chip } = req.body;
-    if (!numbers || numbers.length === 0) throw new Error("Nenhum giro fornecido.");
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-    const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-    const report = await SimulationEngine.runBacktest(safeNumbers, initial_bankroll, min_chip, activeStrategies);
-    res.json(report);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/warm-start", async (req, res) => {
-  try {
-    const { initial_bankroll, min_chip, numbers } = req.body;
-
-    await prisma.session.updateMany({
-      where: { status: "ACTIVE" },
-      data: { status: "CLOSED", closed_at: new Date() }
-    });
-
-    const session = await prisma.session.create({ 
-      data: { 
-        initial_bankroll: parseFloat(initial_bankroll), 
-        current_bankroll: parseFloat(initial_bankroll), 
-        highest_bankroll: parseFloat(initial_bankroll), 
-        min_chip: parseFloat(min_chip), 
-        status: "ACTIVE" 
-      } 
-    });
-
-    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 0 && n <= 36);
-    safeNumbers.reverse();
-
-    for (const num of safeNumbers) {
+    const safeNumbers = numbers.map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n));
+    
+    // Inserção em lote para performance no SQLite
+    for (const num of safeNumbers.reverse()) {
       await prisma.spin.create({
         data: { 
           session_id: session.id, 
           number: num, 
-          color: getNumberColor(num), 
-          parity: getNumberParity(num), 
-          dozen: getNumberDozen(num), 
-          column: getNumberColumn(num), 
-          half: getNumberHalf(num) 
+          color: getNumberColor(num),
+          parity: num % 2 === 0 ? "EVEN" : "ODD",
+          dozen: num <= 12 ? "1" : num <= 24 ? "2" : "3",
+          column: (num % 3 === 0 ? 3 : num % 3).toString(),
+          half: num <= 18 ? "1" : "2"
         }
       });
     }
-
-    const recentSpins = await prisma.spin.findMany({
-      where: { session_id: session.id },
-      orderBy: { created_at: "desc" },
-      take: 50
-    });
-    const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-    await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
 
     res.json({ success: true, session });
   } catch (error: any) { 
@@ -246,56 +99,8 @@ app.post("/api/sessions/warm-start", async (req, res) => {
   }
 });
 
-app.get("/api/sessions/:id/dashboard", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const session = await prisma.session.findUnique({ where: { id }, include: { spins: { orderBy: { created_at: "desc" } }, signals: { include: { strategy: true }, orderBy: { created_at: "desc" } } } });
-    if (!session) return res.status(404).json({ error: "Not found" });
-    res.json({ session, zScore: 0, strategiesStatus: [] });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/close", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const session = await prisma.session.update({ where: { id }, data: { status: "CLOSED", closed_at: new Date() } });
-    await prisma.signal.updateMany({ where: { session_id: id, result: { in: ["PENDING", "SUGGESTED"] } }, data: { result: "MISSED" } });
-    res.json(session);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/sessions/:id/spins", async (req, res) => {
-  try {
-    const { id } = req.params; const { number } = req.body;
-    await StrategyOrchestrator.resolvePendingSignals(number, id);
-    const spin = await prisma.spin.create({ data: { session_id: id, number, color: getNumberColor(number), parity: getNumberParity(number), dozen: getNumberDozen(number), column: getNumberColumn(number), half: getNumberHalf(number) } });
-    const session = await prisma.session.findUnique({ where: { id } });
-    if (session) {
-      const recentSpins = await prisma.spin.findMany({ where: { session_id: id }, orderBy: { created_at: "desc" } });
-      const activeStrategies = await prisma.strategy.findMany({ where: { is_active: true } });
-      await StrategyOrchestrator.analyzeMarket(recentSpins, activeStrategies, session);
-    }
-    res.json(spin);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.post("/api/signals/:id/action", async (req, res) => {
-  try {
-    const { id } = req.params; const { action } = req.body;
-    if (action === "CONFIRM") await prisma.signal.update({ where: { id }, data: { result: "PENDING" } });
-    else if (action === "REJECT") await prisma.signal.update({ where: { id }, data: { result: "MISSED" } });
-    res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
-});
-
-app.use(express.static(path.join(process.cwd(), "dist")));
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "dist", "index.html"));
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
-  console.log(`\n[RL.SYS HFT] Servidor Operacional na porta: ${PORT}`);
+  console.log(`[ENTERPRISE] Servidor ativo na porta ${PORT}`);
   await syncStrategiesToDatabase(prisma);
 });
