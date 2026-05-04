@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../SupabaseClient';
-import { StrategyOrchestrator } from '../services/StrategyOrchestrator';
+import { getSupabaseClient } from '../SupabaseClient.ts';
+import { StrategyOrchestrator } from '../services/StrategyOrchestrator.ts';
 
 export class SessionController {
   /**
-   * Cria uma nova sessão no Supabase e inicia o monitoramento HFT
+   * Abre uma nova sessão de PaperTrading no Supabase
    */
   public static async create(req: Request, res: Response) {
     const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
+    if (!supabase) return res.status(500).json({ error: "Conexão Supabase falhou" });
 
     try {
       const { initial_bankroll } = req.body;
@@ -25,16 +25,15 @@ export class SessionController {
         .single();
 
       if (error) throw error;
-
       return res.status(201).json(data);
     } catch (error: any) {
-      console.error("Erro ao criar sessão no Supabase:", error.message);
-      return res.status(500).json({ error: "Falha na abertura de caixa no Supabase" });
+      console.error("Erro ao criar sessão:", error.message);
+      return res.status(500).json({ error: "Falha ao registrar sessão na nuvem" });
     }
   }
 
   /**
-   * Dashboard da Sessão: Busca o pulso atual da mesa (Giro + Sinais)
+   * Sincroniza o Dashboard da ActiveSession (Giros, Heatmap e Sinais)
    */
   public static async getById(req: Request, res: Response) {
     const { id } = req.params;
@@ -42,16 +41,16 @@ export class SessionController {
     if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
 
     try {
-      // 1. Busca dados da sessão
+      // Busca dados da sessão atual
       const { data: session, error: sError } = await supabase
         .from('sessions')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (sError || !session) return res.status(404).json({ error: "Sessão não localizada" });
+      if (sError || !session) return res.status(404).json({ error: "Mesa não encontrada" });
 
-      // 2. Busca últimos 50 giros (para o Heatmap e Linha do Tempo)
+      // Busca histórico de giros (amostragem para VIX/Entropia)
       const { data: spins } = await supabase
         .from('spins')
         .select('*')
@@ -59,7 +58,7 @@ export class SessionController {
         .order('created_at', { ascending: false })
         .limit(50);
 
-      // 3. Busca sinais ativos (Sugestões do Oráculo)
+      // Busca sinais disparados pelo Oráculo
       const { data: signals } = await supabase
         .from('signals')
         .select('*')
@@ -67,7 +66,6 @@ export class SessionController {
         .order('created_at', { ascending: false })
         .limit(10);
 
-      // Retorna o objeto formatado exatamente como o seu Frontend (ActiveSession.tsx) precisa
       return res.json({
         session: {
           ...session,
@@ -81,19 +79,19 @@ export class SessionController {
   }
 
   /**
-   * O Motor do Oráculo: Recebe o número e decide a estratégia
+   * Registra giro e executa análise estatística em tempo real
    */
   public static async registerSpin(req: Request, res: Response) {
     const { id } = req.params;
     const { number } = req.body;
     const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
+    if (!supabase) return res.status(500).json({ error: "Erro de conexão" });
 
     try {
-      // Grava o giro
+      // 1. Persiste o número no banco
       await supabase.from('spins').insert([{ session_id: id, number }]);
 
-      // Recupera histórico para o Oráculo
+      // 2. Coleta amostragem para o Oráculo
       const { data: history } = await supabase
         .from('spins')
         .select('number')
@@ -103,7 +101,7 @@ export class SessionController {
 
       const numbers = history?.map(s => s.number).reverse() || [];
       
-      // Aciona a Inteligência do Sistema
+      // 3. Processamento de Estratégia HFT
       const analysis = StrategyOrchestrator.analyze(numbers);
 
       if (analysis) {
@@ -117,7 +115,7 @@ export class SessionController {
         }]);
       }
 
-      return res.json({ success: true });
+      return res.json({ success: true, signalDetected: !!analysis });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
