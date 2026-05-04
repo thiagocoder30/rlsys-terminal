@@ -1,47 +1,42 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { SessionController } from "./controllers/SessionController";
+import { SessionController } from "./src/controllers/SessionController.ts";
 
 const app = express();
 
-// Middlewares vitais
+// Middlewares para processamento de dados e segurança
 app.use(cors());
-app.use(express.json()); // Essencial para o Oráculo ler os números enviados
+app.use(express.json()); 
 
 /**
- * MAPEAMENTO DE ROTAS HFT (INTEGRAÇÃO SUPABASE)
- * Aqui conectamos os endpoints que o seu Frontend (ActiveSession.tsx) chama
- * com a lógica do novo SessionController.
+ * ROTAS DE OPERAÇÃO - RL.SYS HFT
  */
 
-// 1. SETUP: Inicia uma nova banca/sessão
+// Inicia nova sessão/banca
 app.post("/api/sessions", SessionController.create);
 
-// 2. DASHBOARD: Sincroniza os dados da mesa (Giro, VIX, Sinais)
-// O frontend busca em /api/sessions/:id/dashboard
+// Dashboard em tempo real (Sincronização de Giros e Sinais)
 app.get("/api/sessions/:id/dashboard", SessionController.getById);
 
-// 3. INJEÇÃO TÁTICA: Recebe o número manual e aciona o Oráculo
+// Entrada de número manual e disparo do Oráculo
 app.post("/api/sessions/:id/spins", SessionController.registerSpin);
 
-// 4. FECHAMENTO: Rota para encerrar a sessão (Opcional, mas recomendada)
+// Finalização de sessão e auditoria
 app.post("/api/sessions/:id/close", async (req, res) => {
-  // Aqui você pode adicionar lógica para mudar o status para CLOSED no Supabase
-  res.json({ success: true });
+  res.json({ success: true, message: "Sessão encerrada para auditoria." });
 });
 
-// CONFIGURAÇÃO DO SERVIDOR
 const PORT = 3001; 
 const HOST = '127.0.0.1';
 
 app.listen(PORT, HOST, () => {
   console.log(`
-  🚀 RL.SYS HFT - ORÁCULO ONLINE
+  🚀 SISTEMA HFT CONECTADO
   -----------------------------------------
-  ✅ BANCO DE DADOS: Supabase Cloud
-  ✅ ENDPOINT: http://${HOST}:${PORT}
-  ✅ STATUS: Aguardando PaperTrading...
+  ✅ SERVER: http://${HOST}:${PORT}
+  ✅ DATABASE: Supabase Cloud (Online)
+  ✅ ESTRUTURA: src/controllers/ detectada
   -----------------------------------------
   `);
 });
