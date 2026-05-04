@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../SupabaseClient.ts';
+import { getSupabaseClient } from '../services/supabaseClient.ts';
 import { StrategyOrchestrator } from '../services/StrategyOrchestrator.ts';
 
 export class SessionController {
   /**
-   * Abre uma nova sessão de PaperTrading no Supabase
+   * Abre uma nova sessão no Supabase
    */
   public static async create(req: Request, res: Response) {
     const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Conexão Supabase falhou" });
+    if (!supabase) return res.status(500).json({ error: "Erro de configuração no Supabase" });
 
     try {
       const { initial_bankroll } = req.body;
@@ -33,7 +33,7 @@ export class SessionController {
   }
 
   /**
-   * Sincroniza o Dashboard da ActiveSession (Giros, Heatmap e Sinais)
+   * Sincroniza o Dashboard em tempo real
    */
   public static async getById(req: Request, res: Response) {
     const { id } = req.params;
@@ -41,16 +41,14 @@ export class SessionController {
     if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
 
     try {
-      // Busca dados da sessão atual
       const { data: session, error: sError } = await supabase
         .from('sessions')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (sError || !session) return res.status(404).json({ error: "Mesa não encontrada" });
+      if (sError || !session) return res.status(404).json({ error: "Sessão não encontrada" });
 
-      // Busca histórico de giros (amostragem para VIX/Entropia)
       const { data: spins } = await supabase
         .from('spins')
         .select('*')
@@ -58,7 +56,6 @@ export class SessionController {
         .order('created_at', { ascending: false })
         .limit(50);
 
-      // Busca sinais disparados pelo Oráculo
       const { data: signals } = await supabase
         .from('signals')
         .select('*')
@@ -79,7 +76,7 @@ export class SessionController {
   }
 
   /**
-   * Registra giro e executa análise estatística em tempo real
+   * Registra giro e aciona o motor de estratégias
    */
   public static async registerSpin(req: Request, res: Response) {
     const { id } = req.params;
@@ -88,10 +85,10 @@ export class SessionController {
     if (!supabase) return res.status(500).json({ error: "Erro de conexão" });
 
     try {
-      // 1. Persiste o número no banco
+      // 1. Grava o número no histórico
       await supabase.from('spins').insert([{ session_id: id, number }]);
 
-      // 2. Coleta amostragem para o Oráculo
+      // 2. Coleta amostragem para análise estatística
       const { data: history } = await supabase
         .from('spins')
         .select('number')
@@ -101,7 +98,7 @@ export class SessionController {
 
       const numbers = history?.map(s => s.number).reverse() || [];
       
-      // 3. Processamento de Estratégia HFT
+      // 3. Processamento do Oráculo
       const analysis = StrategyOrchestrator.analyze(numbers);
 
       if (analysis) {
