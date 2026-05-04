@@ -1,5 +1,8 @@
-import { PrismaClient } from "@prisma/client";
+import { getSupabaseClient } from './supabaseClient.ts';
 
+/**
+ * Definição das Matrizes Táticas Padrão
+ */
 const defaultStrategies = [
   {
     name: "Triplications: Color Surf",
@@ -18,23 +21,40 @@ const defaultStrategies = [
   }
 ];
 
-export async function syncStrategiesToDatabase(prisma: PrismaClient) {
-  console.log("[BOOTSTRAP] Sincronizando Matrizes Táticas com o Banco de Dados Local...");
+/**
+ * Sincroniza as estratégias com o banco de dados Supabase
+ */
+export async function syncStrategiesToDatabase() {
+  const supabase = getSupabaseClient();
+  
+  if (!supabase) {
+    console.error("[BOOTSTRAP] Erro crítico: Cliente Supabase não inicializado.");
+    return;
+  }
+
+  console.log("[BOOTSTRAP] Iniciando sincronização de estratégias com Supabase...");
 
   for (const strat of defaultStrategies) {
-    await prisma.strategy.upsert({
-      where: { name: strat.name },
-      update: {
-        description: strat.description,
-        is_active: strat.is_active,
-      },
-      create: {
-        name: strat.name,
-        description: strat.description,
-        is_active: strat.is_active,
-      },
-    });
+    try {
+      // Usamos o upsert para inserir se não existir ou atualizar se já existir (baseado no nome)
+      const { error } = await supabase
+        .from('strategies')
+        .upsert(
+          { 
+            name: strat.name, 
+            description: strat.description, 
+            is_active: strat.is_active 
+          }, 
+          { onConflict: 'name' }
+        );
+
+      if (error) {
+        console.error(`[BOOTSTRAP] Falha ao sincronizar estratégia ${strat.name}:`, error.message);
+      }
+    } catch (err) {
+      console.error(`[BOOTSTRAP] Erro inesperado na estratégia ${strat.name}:`, err);
+    }
   }
   
-  console.log("[BOOTSTRAP] Sincronização Concluída.");
+  console.log("[BOOTSTRAP] Matrizes táticas prontas para operação.");
 }
