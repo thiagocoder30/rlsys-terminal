@@ -1,59 +1,47 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { PrismaClient } from "@prisma/client";
+import { SessionController } from "./controllers/SessionController";
 
-const prisma = new PrismaClient();
 const app = express();
 
+// Middlewares vitais
 app.use(cors());
-app.use(express.json());
+app.use(express.json()); // Essencial para o Oráculo ler os números enviados
 
-// ROTA DE SINCRONIZAÇÃO
-app.get("/api/sessions/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const session = await prisma.session.findUnique({
-      where: { id },
-      include: {
-        signals: { include: { strategy: true }, orderBy: { created_at: "desc" } },
-        spins: { orderBy: { created_at: "desc" }, take: 40 }
-      }
-    });
+/**
+ * MAPEAMENTO DE ROTAS HFT (INTEGRAÇÃO SUPABASE)
+ * Aqui conectamos os endpoints que o seu Frontend (ActiveSession.tsx) chama
+ * com a lógica do novo SessionController.
+ */
 
-    if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+// 1. SETUP: Inicia uma nova banca/sessão
+app.post("/api/sessions", SessionController.create);
 
-    res.json({
-      ...session,
-      signals: session.signals || [],
-      spins: session.spins || [],
-      current_bankroll: Number(session.current_bankroll || 0)
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Erro de sincronização" });
-  }
+// 2. DASHBOARD: Sincroniza os dados da mesa (Giro, VIX, Sinais)
+// O frontend busca em /api/sessions/:id/dashboard
+app.get("/api/sessions/:id/dashboard", SessionController.getById);
+
+// 3. INJEÇÃO TÁTICA: Recebe o número manual e aciona o Oráculo
+app.post("/api/sessions/:id/spins", SessionController.registerSpin);
+
+// 4. FECHAMENTO: Rota para encerrar a sessão (Opcional, mas recomendada)
+app.post("/api/sessions/:id/close", async (req, res) => {
+  // Aqui você pode adicionar lógica para mudar o status para CLOSED no Supabase
+  res.json({ success: true });
 });
 
-app.post("/api/sessions/warm-start", async (req, res) => {
-  try {
-    const { initial_bankroll } = req.body;
-    const session = await prisma.session.create({
-      data: {
-        initial_bankroll: parseFloat(initial_bankroll) || 100,
-        current_bankroll: parseFloat(initial_bankroll) || 100,
-        status: "ACTIVE"
-      }
-    });
-    res.json({ success: true, session });
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao iniciar" });
-  }
-});
-
-// MUDANÇA ESTRATÉGICA PARA PORTA 3001 (EVITA EADDRINUSE)
+// CONFIGURAÇÃO DO SERVIDOR
 const PORT = 3001; 
 const HOST = '127.0.0.1';
 
 app.listen(PORT, HOST, () => {
-  console.log(`✅ SERVER ONLINE NA NOVA PORTA: http://${HOST}:${PORT}`);
+  console.log(`
+  🚀 RL.SYS HFT - ORÁCULO ONLINE
+  -----------------------------------------
+  ✅ BANCO DE DADOS: Supabase Cloud
+  ✅ ENDPOINT: http://${HOST}:${PORT}
+  ✅ STATUS: Aguardando PaperTrading...
+  -----------------------------------------
+  `);
 });
