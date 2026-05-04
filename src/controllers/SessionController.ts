@@ -3,16 +3,12 @@ import { getSupabaseClient } from '../services/supabaseClient.ts';
 import { StrategyOrchestrator } from '../services/StrategyOrchestrator.ts';
 
 export class SessionController {
-  /**
-   * Abre uma nova sessão no Supabase
-   */
   public static async create(req: Request, res: Response) {
     const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Erro de configuração no Supabase" });
+    if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
 
     try {
       const { initial_bankroll } = req.body;
-
       const { data, error } = await supabase
         .from('sessions')
         .insert([{
@@ -21,63 +17,45 @@ export class SessionController {
           highest_bankroll: parseFloat(initial_bankroll),
           status: "OPEN"
         }])
-        .select()
-        .single();
+        .select().single();
 
       if (error) throw error;
       return res.status(201).json(data);
     } catch (error: any) {
-      console.error("Erro ao criar sessão:", error.message);
-      return res.status(500).json({ error: "Falha ao registrar sessão na nuvem" });
+      return res.status(500).json({ error: "Falha ao criar sessão no Supabase" });
     }
   }
 
-  /**
-   * Sincroniza o Dashboard em tempo real
-   */
   public static async getById(req: Request, res: Response) {
     const { id } = req.params;
     const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
+    
+    // Trava de segurança para evitar loop infinito com IDs inválidos
+    if (!id || id === 'undefined' || id === 'null' || id.length < 5) {
+      return res.status(400).json({ error: "Sessão inválida" });
+    }
 
     try {
-      const { data: session, error: sError } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('id', id)
-        .single();
+      const { data: session, error } = await supabase
+        .from('sessions').select('*').eq('id', id).single();
 
-      if (sError || !session) return res.status(404).json({ error: "Sessão não encontrada" });
+      // Se a sessão não existe no novo Supabase, retornamos 404
+      if (error || !session) {
+        return res.status(404).json({ error: "Sessão inexistente no novo DB" });
+      }
 
       const { data: spins } = await supabase
-        .from('spins')
-        .select('*')
-        .eq('session_id', id)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .from('spins').select('*').eq('session_id', id).order('created_at', { ascending: false }).limit(50);
 
       const { data: signals } = await supabase
-        .from('signals')
-        .select('*')
-        .eq('session_id', id)
-        .order('created_at', { ascending: false })
-        .limit(10);
+        .from('signals').select('*').eq('session_id', id).order('created_at', { ascending: false }).limit(10);
 
-      return res.json({
-        session: {
-          ...session,
-          spins: spins || [],
-          signals: signals || []
-        }
-      });
+      return res.json({ session: { ...session, spins: spins || [], signals: signals || [] } });
     } catch (error: any) {
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: "Erro interno de sincronização" });
     }
   }
 
-  /**
-   * Registra giro e aciona o motor de estratégias
-   */
   public static async registerSpin(req: Request, res: Response) {
     const { id } = req.params;
     const { number } = req.body;
@@ -85,20 +63,11 @@ export class SessionController {
     if (!supabase) return res.status(500).json({ error: "Erro de conexão" });
 
     try {
-      // 1. Grava o número no histórico
       await supabase.from('spins').insert([{ session_id: id, number }]);
-
-      // 2. Coleta amostragem para análise estatística
       const { data: history } = await supabase
-        .from('spins')
-        .select('number')
-        .eq('session_id', id)
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .from('spins').select('number').eq('session_id', id).order('created_at', { ascending: false }).limit(100);
 
       const numbers = history?.map(s => s.number).reverse() || [];
-      
-      // 3. Processamento do Oráculo
       const analysis = StrategyOrchestrator.analyze(numbers);
 
       if (analysis) {
@@ -111,8 +80,7 @@ export class SessionController {
           result: 'SUGGESTED'
         }]);
       }
-
-      return res.json({ success: true, signalDetected: !!analysis });
+      return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
