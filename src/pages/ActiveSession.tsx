@@ -214,4 +214,76 @@ export const ActiveSession: React.FC = () => {
             <span className="text-[10px] font-mono text-blue-400 font-bold">{uniqueCount}/37</span>
           </div>
           <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
-            
+            <motion.div 
+              className="h-full bg-blue-500" 
+              initial={{ width: 0 }}
+              animate={{ width: `${(uniqueCount/37)*100}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* WHEEL HEATMAP & TIMELINE */}
+      <div className="grid gap-3">
+        <div className="bg-[#111827] border border-slate-800 rounded-2xl p-4">
+          <WheelHeatmap spins={spinsList} />
+        </div>
+        <div className="bg-[#111827] border border-slate-800 rounded-2xl p-4 overflow-hidden">
+          <SpinTimeline spins={spinsList} />
+        </div>
+      </div>
+
+      {/* TACTICAL SIGNALS */}
+      <div className="space-y-3">
+        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-1 flex items-center gap-2">
+            <Target className="w-3 h-3 text-blue-500" /> Gatilhos de Alta Frequência
+        </h3>
+        <AnimatePresence mode="popLayout">
+            {activeSignals.length === 0 ? (
+            <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="bg-[#0B101E] border border-slate-800/50 border-dashed p-8 rounded-2xl text-center"
+            >
+                <div className="animate-pulse flex flex-col items-center">
+                    <div className="w-8 h-8 rounded-full border-2 border-slate-800 border-t-blue-500 animate-spin mb-3"></div>
+                    <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Mapeando padrões residuais...</span>
+                </div>
+            </motion.div>
+            ) : (
+            activeSignals.map((sig: any) => (
+                <motion.div 
+                    key={sig.id}
+                    initial={{ opacity: 0, x: -10 }} 
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="p-5 rounded-2xl border border-blue-500/30 bg-blue-900/10 shadow-lg relative overflow-hidden group"
+                >
+                    <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                    <div className="flex justify-between items-center relative z-10">
+                        <div>
+                            <span className="text-[9px] text-blue-400 font-black uppercase tracking-widest flex items-center gap-1 mb-1">
+                                <ShieldCheck className="w-3 h-3" /> {sig.strategy_name}
+                            </span>
+                            <span className="text-2xl font-black text-white block tracking-tighter uppercase">{sig.target_bet}</span>
+                        </div>
+                        <div className="text-right">
+                            <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Fichas Sugeridas</span>
+                            <span className="text-2xl font-mono font-black text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg">
+                                R$ {sig.suggested_amount.toFixed(2)}
+                            </span>
+                        </div>
+                    </div>
+                </motion.div>
+            ))
+            )}
+        </AnimatePresence>
+      </div>
+
+      {/* MANUAL ENTRY */}
+      <div className="bg-[#111827] border border-slate-800 rounded-3xl p-5 shadow-2xl sticky bottom-4 z-40 backdrop-blur-md bg-opacity-90">
+        <ManualEntryInput onNumberSubmit={handleNumberClick} disabled={false} />
+      </div>
+
+    </div>
+  );
+};
