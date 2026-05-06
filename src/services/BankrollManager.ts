@@ -1,9 +1,17 @@
-// src/services/BankrollManager.ts
+/**
+ * RL.sys - Gerenciador de Banca
+ * Responsável por calcular o valor das apostas usando o Critério de Kelly Fracionário.
+ */
 
 export class BankrollManager {
   /**
-   * Calcula a aposta ideal usando Kelly Criterion Fracionário de alta segurança.
-   * Protege bancas pequenas e alavanca agressivamente apenas no "Modo Sniper".
+   * Calcula a aposta ideal com blindagem institucional e arredondamento tático.
+   * * @param currentBankroll Saldo atual da sessão.
+   * @param minChip Valor da menor ficha permitida na mesa (ex: 0.10, 0.50).
+   * @param baseMultiplier Quantidade de fichas que a estratégia exige (ex: 26 fichas).
+   * @param winRate Taxa de acerto atual da estratégia (0-100).
+   * @param payoutRatio Razão de lucro líquido (ex: 10/26 ou 1.2).
+   * @returns O valor em dinheiro a ser apostado.
    */
   public static calculateSafeBet(
     currentBankroll: number,
@@ -12,55 +20,54 @@ export class BankrollManager {
     winRate: number,
     payoutRatio: number
   ): number {
-    const baseBet = minChip * baseMultiplier;
+    // PROTEÇÃO: Garante que o minChip nunca seja zero para evitar erros matemáticos
+    const safeMinChip = minChip <= 0 ? 0.10 : minChip;
+    const baseBet = safeMinChip * baseMultiplier;
 
-    // 1. ZONA DE SOBREVIVÊNCIA: Risco de ruína alto. Proteção de capital prioritária.
+    // 1. ZONA DE SOBREVIVÊNCIA: Se a banca for menor que 30x a aposta base, não arrisca.
     if (currentBankroll < baseBet * 30) {
       return baseBet;
     }
 
-    // 2. ASSERTIVIDADE MATEMÁTICA: Exige vantagem para alavancar.
     const p = winRate / 100;
     const q = 1 - p;
 
-    // Se a estratégia acerta menos de 65%, é arriscado alavancar na roleta.
+    // 2. ASSERTIVIDADE MÍNIMA: Exige pelo menos 65% de confiança para alavancar.
     if (p < 0.65) {
       return baseBet;
     }
 
-    // 3. CRITÉRIO DE KELLY CONSERVADOR (10% Kelly)
-    // f = p - (q / b) (Onde b é o lucro líquido da aposta)
+    // 3. CRITÉRIO DE KELLY CONSERVADOR (10% do Kelly Original)
     const b = payoutRatio > 0 ? payoutRatio : 1;
     const pureKellyFraction = p - (q / b);
-    
-    // Blindagem Institucional: Usa apenas 10% da banca recomendada pelo Kelly Original
     const safeKellyFraction = pureKellyFraction * 0.10;
 
+    // Se o Kelly resultar em valor negativo ou zero, volta para aposta mínima.
     if (safeKellyFraction <= 0) return baseBet;
 
     let idealBet = currentBankroll * safeKellyFraction;
     
-    // 4. ARREDONDAMENTO TÁTICO: Converte para múltiplos exatos de fichas (0.10 ou 0.50)
-    let calculatedBet = Math.floor(idealBet / minChip) * minChip;
+    // 4. ARREDONDAMENTO TÁTICO: Garante que o valor seja múltiplo exato das fichas da mesa.
+    let calculatedBet = Math.floor(idealBet / safeMinChip) * safeMinChip;
 
-    // 5. TRAVAS DE TETO E PISO
+    // 5. TRAVAS DE SEGURANÇA (PISO E TETO)
     if (calculatedBet < baseBet) calculatedBet = baseBet;
 
-    // Stop Loss Natural: NUNCA arrisca mais de 6% da banca em uma entrada normal
+    // Stop Loss por Entrada: Nunca arrisca mais de 6% da banca em uma única jogada.
     const maxBetLimit = currentBankroll * 0.06;
     if (calculatedBet > maxBetLimit) {
-      calculatedBet = Math.floor(maxBetLimit / minChip) * minChip;
+      calculatedBet = Math.floor(maxBetLimit / safeMinChip) * safeMinChip;
     }
 
-    // 6. MODO SNIPER (Vantagem Extrema)
-    // Se a taxa de acerto passar de 90% e a banca aguentar, ataca com até 10% da banca
+    // 6. MODO SNIPER: Alavancagem agressiva para cenários de altíssima probabilidade (>90%).
     if (winRate >= 90 && currentBankroll > baseBet * 50) {
         const sniperBet = currentBankroll * 0.10;
         if (calculatedBet < sniperBet) {
-            calculatedBet = Math.floor(sniperBet / minChip) * minChip;
+            calculatedBet = Math.floor(sniperBet / safeMinChip) * safeMinChip;
         }
     }
 
-    return Number(calculatedBet.toFixed(2));
+    // Retorno formatado para evitar dízimas infinitas do JavaScript (ex: 10.000000004)
+    return parseFloat(calculatedBet.toFixed(2));
   }
 }
