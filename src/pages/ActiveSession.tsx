@@ -1,36 +1,36 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Activity, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, TrendingUp, PowerOff, Target, Gauge, PieChart, Zap } from 'lucide-react';
+import { 
+  Activity, ShieldCheck, AlertTriangle, CheckCircle2, 
+  XCircle, TrendingUp, PowerOff, Target, Gauge, PieChart, Zap 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Componentes Visuais
+// Componentes Visuais (Certifique-se que os caminhos estão corretos)
 import { SpinTimeline } from '../components/SpinTimeline';
 import { ManualEntryInput } from '../components/ManualEntryInput';
 import { WheelHeatmap } from '../components/WheelHeatmap';
 
 // ==========================================
-// UTILITÁRIOS MATEMÁTICOS ORIGINAIS
+// UTILITÁRIOS MATEMÁTICOS TÁTICOS
 // ==========================================
-const getPayoutRatio = (stratName: string) => {
+
+const getPayoutRatio = (stratName: string): number => {
   if (!stratName) return 1.0;
-  if (stratName.includes("Vizinhos")) return 10 / 26; 
-  if (stratName.includes("James Bond")) return 8 / 20;
-  if (stratName.includes("Cross")) return 9 / 21; 
-  if (stratName.includes("Dúzia") || stratName.includes("Coluna")) return 2.0;
-  if (stratName.includes("Drop Zone")) return 31 / 5;
-  if (stratName.includes("Alpha")) return 11 / 25;
-  if (stratName.includes("Omega")) return 15 / 21;
-  if (stratName.includes("Hedge")) return 9 / 27;
-  if (stratName.includes("Macro") || stratName.includes("Zero")) return 17 / 19;
-  if (stratName.includes("Quantum")) return 36.0;
-  return 1.0;
+  const name = stratName.toLowerCase();
+  if (name.includes("vizinhos")) return 36 / 5; // Ex: Vizinhos de 2 lados (5 números)
+  if (name.includes("james bond")) return 2.0;
+  if (name.includes("dúzia") || name.includes("coluna")) return 2.0;
+  if (name.includes("quantum")) return 35.0;
+  if (name.includes("zero")) return 35.0;
+  return 1.0; // Payout padrão (Even Money)
 };
 
-const calculateEntropy = (spins: any[]) => {
+const calculateEntropy = (spins: any[]): number => {
   if (!spins || spins.length < 10) return 0;
-  const sample = spins.slice(0, 37).map((s:any) => s.number !== undefined ? s.number : s);
+  const sample = spins.slice(0, 37).map(s => (typeof s === 'object' ? s.number : s));
   const counts: Record<number, number> = {};
-  sample.forEach((n:number) => counts[n] = (counts[n] || 0) + 1);
+  sample.forEach(n => { counts[n] = (counts[n] || 0) + 1; });
   let entropy = 0;
   for (const key in counts) {
     const p = counts[key] / sample.length;
@@ -42,10 +42,14 @@ const calculateEntropy = (spins: any[]) => {
 const calculateLawOfThird = (spins: any[]) => {
   if (!spins || spins.length === 0) return { uniqueCount: 0, sampleSize: 0 };
   const sampleSize = Math.min(spins.length, 37);
-  const sample = spins.slice(0, sampleSize).map((s:any) => s.number !== undefined ? s.number : s);
+  const sample = spins.slice(0, sampleSize).map(s => (typeof s === 'object' ? s.number : s));
   const uniqueNumbers = new Set(sample);
   return { uniqueCount: uniqueNumbers.size, sampleSize };
 };
+
+// ==========================================
+// COMPONENTE PRINCIPAL
+// ==========================================
 
 export const ActiveSession: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -54,22 +58,18 @@ export const ActiveSession: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [sessionTime, setSessionTime] = useState<number>(0);
-  const [circuitBreaker, setCircuitBreaker] = useState<{active: boolean, spinsLeft: number}>({active: false, spinsLeft: 0});
-  const [activeModal, setActiveModal] = useState<{type: 'GREEN'|'LOSS'|'GALE'|'GLOBAL_STOP', data?: any, metrics?: any} | null>(null);
-  
-  const prevSignalsRef = useRef<any[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // ==========================================
-  // SINCRONIZAÇÃO SUPABASE (PORTA 3001)
-  // ==========================================
+  // --- SINCRONIZAÇÃO COM BACKEND (PORTA 3001) ---
+
   const fetchData = useCallback(async () => {
     if (!id || id === 'undefined') return;
+    setIsSyncing(true);
     try {
       const res = await fetch(`http://127.0.0.1:3001/api/sessions/${id}/dashboard`);
       
-      // PROTEÇÃO DE BANCO NOVO: Se o ID não existe no Supabase, mata o loop
       if (res.status === 404 || res.status === 400) {
-        localStorage.removeItem("activeSessionId");
+        localStorage.removeItem("rlsys_active_session");
         navigate('/');
         return;
       }
@@ -77,25 +77,27 @@ export const ActiveSession: React.FC = () => {
       const json = await res.json();
       
       if (json.session?.status === "CLOSED") { 
-        localStorage.removeItem("activeSessionId"); 
+        localStorage.removeItem("rlsys_active_session"); 
         navigate(`/audit/${id}`); 
-      } else { 
-        setData(json); 
+        return;
       }
-    } catch (err: any) {
-      console.error("Erro de conexão com o servidor 3001");
+
+      setData(json);
+    } catch (err) {
+      console.warn("RL.SYS: Servidor HFT offline ou instável.");
     } finally {
       setLoading(false);
+      setIsSyncing(false);
     }
   }, [id, navigate]);
 
   useEffect(() => { 
     fetchData();
-    const int = setInterval(fetchData, 3000); // Polling de 3s para economizar bateria no A14
+    const int = setInterval(fetchData, 3000); // Polling 3s
     return () => clearInterval(int); 
   }, [fetchData]);
 
-  // Lógica de Cronômetro
+  // Cronômetro da Sessão
   useEffect(() => {
     if (!data?.session?.created_at || data?.session?.status === "CLOSED") return;
     const startTime = new Date(data.session.created_at).getTime();
@@ -105,11 +107,10 @@ export const ActiveSession: React.FC = () => {
     return () => clearInterval(interval);
   }, [data]);
 
-  // ==========================================
-  // AÇÕES DO USUÁRIO
-  // ==========================================
+  // --- HANDLERS ---
+
   const handleNumberClick = async (number: number) => {
-    if (!id || activeModal?.type === 'GLOBAL_STOP') return;
+    if (!id) return;
     try { 
       await fetch(`http://127.0.0.1:3001/api/sessions/${id}/spins`, { 
         method: "POST", 
@@ -117,109 +118,100 @@ export const ActiveSession: React.FC = () => {
         body: JSON.stringify({ number }) 
       }); 
       fetchData(); 
-    } catch (err) {}
+    } catch (err) {
+      console.error("Erro ao registrar número.");
+    }
   };
 
   const handleCloseSession = async () => {
-    if (!window.confirm("Confirmar fechamento de caixa?")) return;
+    if (!window.confirm("Deseja realmente encerrar a sessão e fechar o caixa?")) return;
     try {
       await fetch(`http://127.0.0.1:3001/api/sessions/${id}/close`, { method: "POST" });
-      localStorage.removeItem("activeSessionId"); 
+      localStorage.removeItem("rlsys_active_session"); 
       navigate(`/audit/${id}`);
-    } catch (err) { alert("Erro ao fechar"); } 
+    } catch (err) { 
+      alert("Falha ao encerrar sessão."); 
+    } 
   };
+
+  // --- CÁLCULOS DE UI ---
 
   if (loading && !data) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <div className="flex flex-col items-center justify-center py-24 space-y-4">
         <Zap className="w-10 h-10 text-blue-500 animate-pulse" />
-        <span className="text-[10px] font-mono text-slate-400 uppercase tracking-[0.3em]">Sincronizando Oráculo...</span>
+        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-[0.3em]">Sincronizando Oráculo...</span>
       </div>
     );
   }
 
-  // Cálculos de Interface
   const spinsList = data?.session?.spins || [];
-  const pnl = data ? data.session.current_bankroll - data.session.initial_bankroll : 0;
+  const bankroll = data?.session?.current_bankroll || 0;
+  const initialBankroll = data?.session?.initial_bankroll || 0;
+  const pnl = bankroll - initialBankroll;
   const currentEntropy = calculateEntropy(spinsList);
-  const { uniqueCount, sampleSize } = calculateLawOfThird(spinsList);
-  const activeSignals = data?.session?.signals?.filter((s:any) => s.result === 'SUGGESTED' || s.result === 'PENDING') || [];
-  const formatTime = (ms: number) => { const mins = Math.floor(ms / 60000); const secs = Math.floor((ms % 60000) / 1000); return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; };
+  const { uniqueCount } = calculateLawOfThird(spinsList);
+  const activeSignals = data?.session?.signals?.filter((s: any) => s.result === 'SUGGESTED' || s.result === 'PENDING') || [];
+
+  const formatTime = (ms: number) => { 
+    const mins = Math.floor(ms / 60000); 
+    const secs = Math.floor((ms % 60000) / 1000); 
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; 
+  };
 
   return (
-    <div className="flex flex-col space-y-4 pb-10">
+    <div className="flex flex-col space-y-4 pb-12">
       
-      {/* HEADER DE PERFORMANCE (SUPABASE READY) */}
-      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 shadow-lg flex justify-between items-center">
+      {/* PERFORMANCE BAR */}
+      <div className="bg-[#111827] border border-slate-800 rounded-2xl p-5 shadow-2xl flex justify-between items-center relative overflow-hidden">
+        {isSyncing && <div className="absolute top-0 left-0 w-full h-[1px] bg-blue-500 animate-pulse"></div>}
         <div>
-          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Caixa Supabase</span>
-          <span className="text-2xl font-black font-mono text-white">R$ {data.session.current_bankroll.toFixed(2)}</span>
-          <span className={`text-xs font-bold ml-2 ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            ({pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)})
+          <span className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1">
+            <Activity className="w-2 h-2" /> Live Bankroll
           </span>
+          <span className="text-3xl font-black font-mono text-white tracking-tighter">
+            R$ {bankroll.toFixed(2)}
+          </span>
+          <div className={`text-[10px] font-black mt-1 uppercase flex items-center gap-1 ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+            {pnl >= 0 ? '+' : ''}R$ {pnl.toFixed(2)} ({((pnl/initialBankroll)*100).toFixed(1)}%)
+          </div>
         </div>
         <div className="text-right">
-          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Time</span>
-          <span className="text-lg font-mono font-bold text-slate-300">{formatTime(sessionTime)}</span>
-          <button onClick={handleCloseSession} className="mt-2 text-[9px] bg-red-950/40 text-red-400 border border-red-900/50 px-2 py-1 rounded uppercase font-black">
-            Encerrar
+          <span className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Session Time</span>
+          <span className="text-xl font-mono font-black text-slate-300 block mb-2">{formatTime(sessionTime)}</span>
+          <button 
+            onClick={handleCloseSession} 
+            className="bg-red-950/30 text-red-500 border border-red-900/40 px-3 py-1 rounded-lg uppercase font-black text-[9px] hover:bg-red-500 hover:text-white transition-all active:scale-95 flex items-center gap-1"
+          >
+            <PowerOff className="w-3 h-3" /> Encerrar
           </button>
         </div>
       </div>
 
-      {/* PAINEL MATEMÁTICO */}
+      {/* METRICS GRID */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-[#0B101E] border border-slate-800 rounded-xl p-3">
-          <span className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2"><Gauge className="w-3 h-3 text-purple-500" /> VIX</span>
-          <div className="w-full h-1 bg-slate-900 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-500 transition-all" style={{ width: `${Math.min((currentEntropy/5.2)*100, 100)}%` }}></div>
+        <div className="bg-[#0B101E] border border-slate-800 rounded-xl p-4">
+          <div className="flex justify-between items-center mb-3">
+            <span className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+              <Gauge className="w-3 h-3 text-purple-500" /> VIX (Entropy)
+            </span>
+            <span className="text-[10px] font-mono text-purple-400 font-bold">{currentEntropy.toFixed(2)}</span>
+          </div>
+          <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+            <motion.div 
+              className="h-full bg-purple-500" 
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.min((currentEntropy/5.2)*100, 100)}%` }}
+            />
           </div>
         </div>
-        <div className="bg-[#0B101E] border border-slate-800 rounded-xl p-3">
-          <span className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2"><PieChart className="w-3 h-3 text-blue-500" /> Lei do Terço</span>
-          <div className="w-full h-1 bg-slate-900 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 transition-all" style={{ width: `${(uniqueCount/37)*100}%` }}></div>
+        <div className="bg-[#0B101E] border border-slate-800 rounded-xl p-4">
+          <div className="flex justify-between items-center mb-3">
+            <span className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+              <PieChart className="w-3 h-3 text-blue-500" /> Law of Third
+            </span>
+            <span className="text-[10px] font-mono text-blue-400 font-bold">{uniqueCount}/37</span>
           </div>
-        </div>
-      </div>
-
-      {/* HEATMAP E TIMELINE */}
-      <div className="bg-[#111827] border border-slate-800 rounded-xl p-3">
-        <WheelHeatmap spins={spinsList} />
-      </div>
-      <div className="bg-[#111827] border border-slate-800 rounded-xl p-3">
-        <SpinTimeline spins={spinsList} />
-      </div>
-
-      {/* SINAIS TÁTICOS */}
-      <div className="space-y-3">
-        {activeSignals.length === 0 ? (
-          <div className="bg-[#0B101E] border border-slate-800/50 border-dashed p-6 rounded-xl text-center opacity-40">
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Aguardando Convergência...</span>
-          </div>
-        ) : (
-          activeSignals.map((sig: any) => (
-            <div key={sig.id} className="p-4 rounded-xl border border-blue-500/30 bg-blue-900/10 shadow-lg">
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="text-[9px] text-blue-400 font-black uppercase tracking-tighter">{sig.strategy_name}</span>
-                  <span className="text-xl font-black text-white block">{sig.target_bet}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[9px] text-slate-500 font-bold uppercase block">Entrada</span>
-                  <span className="text-xl font-mono font-black text-blue-400">R$ {sig.suggested_amount.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* TECLADO DE ENTRADA (MANTIDO) */}
-      <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 shadow-2xl">
-        <ManualEntryInput onNumberSubmit={handleNumberClick} disabled={false} />
-      </div>
-
-    </div>
-  );
-};
+          <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+            
