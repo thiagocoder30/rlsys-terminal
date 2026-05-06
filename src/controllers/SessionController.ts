@@ -1,88 +1,77 @@
+/**
+ * RL.sys - SessionController
+ * Gerencia o ciclo de vida das sessões no Prisma.
+ */
+
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../services/supabaseClient.ts';
-import { StrategyOrchestrator } from '../services/StrategyOrchestrator.ts';
+import { PrismaClient } from '@prisma/client';
+import { MathEngine } from '../utils/MathEngine';
+
+const prisma = new PrismaClient();
 
 export class SessionController {
-  public static async create(req: Request, res: Response) {
-    const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Cérebro Offline" });
-
+  /**
+   * Cria uma sessão limpa.
+   */
+  async create(req: Request, res: Response) {
     try {
-      const { initial_bankroll } = req.body;
-      const { data, error } = await supabase
-        .from('sessions')
-        .insert([{
+      const { initial_bankroll, min_chip } = req.body;
+
+      const session = await prisma.session.create({
+        data: {
           initial_bankroll: parseFloat(initial_bankroll),
           current_bankroll: parseFloat(initial_bankroll),
           highest_bankroll: parseFloat(initial_bankroll),
-          status: "OPEN"
-        }])
-        .select().single();
+          min_chip: parseFloat(min_chip),
+          status: "ACTIVE"
+        }
+      });
 
-      if (error) throw error;
-      return res.status(201).json(data);
+      return res.status(201).json(session);
     } catch (error: any) {
-      return res.status(500).json({ error: "Falha ao criar sessão no Supabase" });
+      return res.status(500).json({ error: "Falha ao criar sessão neutra." });
     }
   }
 
-  public static async getById(req: Request, res: Response) {
-    const { id } = req.params;
-    const supabase = getSupabaseClient();
-    
-    // Trava de segurança para evitar loop infinito com IDs inválidos
-    if (!id || id === 'undefined' || id === 'null' || id.length < 5) {
-      return res.status(400).json({ error: "Sessão inválida" });
-    }
-
+  /**
+   * Warm-Start: Cria sessão e já injeta o histórico do OCR.
+   */
+  async warmStart(req: Request, res: Response) {
     try {
-      const { data: session, error } = await supabase
-        .from('sessions').select('*').eq('id', id).single();
+      const { initial_bankroll, min_chip, numbers } = req.body;
 
-      // Se a sessão não existe no novo Supabase, retornamos 404
-      if (error || !session) {
-        return res.status(404).json({ error: "Sessão inexistente no novo DB" });
+      // 1. Criar a sessão
+      const session = await prisma.session.create({
+        data: {
+          initial_bankroll: parseFloat(initial_bankroll),
+          current_bankroll: parseFloat(initial_bankroll),
+          highest_bankroll: parseFloat(initial_bankroll),
+          min_chip: parseFloat(min_chip),
+          status: "ACTIVE"
+        }
+      });
+
+      // 2. Injetar números em massa (Bulk Create)
+      if (numbers && Array.isArray(numbers)) {
+        const spinData = numbers.map((n: number) => {
+          const props = MathEngine.getNumberProps(n);
+          return {
+            session_id: session.id,
+            number: n,
+            color: props.color,
+            parity: props.parity,
+            dozen: props.dozen,
+            column: props.col
+          };
+        });
+
+        await prisma.spin.createMany({ data: spinData });
       }
 
-      const { data: spins } = await supabase
-        .from('spins').select('*').eq('session_id', id).order('created_at', { ascending: false }).limit(50);
-
-      const { data: signals } = await supabase
-        .from('signals').select('*').eq('session_id', id).order('created_at', { ascending: false }).limit(10);
-
-      return res.json({ session: { ...session, spins: spins || [], signals: signals || [] } });
+      return res.status(201).json({ success: true, session });
     } catch (error: any) {
-      return res.status(500).json({ error: "Erro interno de sincronização" });
-    }
-  }
-
-  public static async registerSpin(req: Request, res: Response) {
-    const { id } = req.params;
-    const { number } = req.body;
-    const supabase = getSupabaseClient();
-    if (!supabase) return res.status(500).json({ error: "Erro de conexão" });
-
-    try {
-      await supabase.from('spins').insert([{ session_id: id, number }]);
-      const { data: history } = await supabase
-        .from('spins').select('number').eq('session_id', id).order('created_at', { ascending: false }).limit(100);
-
-      const numbers = history?.map(s => s.number).reverse() || [];
-      const analysis = StrategyOrchestrator.analyze(numbers);
-
-      if (analysis) {
-        await supabase.from('signals').insert([{
-          session_id: id,
-          strategy_name: analysis.strategyName,
-          target_bet: analysis.targetBet,
-          suggested_amount: analysis.suggestedAmount,
-          martingale_step: analysis.step || 0,
-          result: 'SUGGESTED'
-        }]);
-      }
-      return res.json({ success: true });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
+      console.error(error);
+      return res.status(500).json({ error: "Falha na injeção de dados warm-start." });
     }
   }
 }
