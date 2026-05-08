@@ -5,3 +5,5 @@ dist/
 .DS_Store
 # Protegendo a API KEY
 src/config/config.ts
+.env
+src/config.ts
