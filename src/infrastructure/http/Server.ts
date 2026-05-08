@@ -1,54 +1,59 @@
-import express, { Request, Response } from 'express';
-import multer from 'multer';
+import express from 'express';
 import { GeminiAdapter } from '../adapters/GeminiAdapter';
-import { ISignalRepository } from '../../domain/math/ISignalRepository';
+import { StrategyEngine } from '../../domain/services/StrategyEngine';
+import { config } from '../../config';
 
-export class Server {
-    private app: express.Application;
-    private upload: multer.Multer;
+const router = express.Router();
+const gemini = new GeminiAdapter(config.geminiApiKey);
+const engine = new StrategyEngine();
 
-    constructor(
-        private port: number,
-        private host: string,
-        private geminiAdapter: GeminiAdapter,
-        private signalRepository: ISignalRepository
-    ) {
-        this.app = express();
-        this.upload = multer({ storage: multer.memoryStorage() });
-        this.setupRoutes();
+router.post('/upload-history', async (req, res) => {
+  try {
+    const { image, bankroll } = req.body;
+    
+    // 1. OCR de Alta Precisão (Zonas A + B)
+    const rawResult = await gemini.analyzeImage(image, "image/jpeg");
+    const data = JSON.parse(rawResult);
+
+    // 2. Processamento Quant (Markov, Shannon, Z-Score)
+    const analysis = engine.analyze(data.sequencia);
+
+    if (!analysis) {
+      return res.status(400).json({ status: "DENIED", reason: "Dados insuficientes para análise quant." });
     }
 
-    private setupRoutes(): void {
-        this.app.use(express.json());
-        this.app.use(express.static("."));
+    // 3. Critério de Aceitação HFT (Thresholds Enterprise)
+    // - Entropia < 4.8 (Indica existência de padrão)
+    // - Volatilidade controlada
+    const isPropitious = analysis.metrics.entropy < 4.8 && analysis.metrics.volatility > 0.5;
 
-        this.app.get('/api/history', async (req, res) => {
-            const history = await this.signalRepository.getHistory(10);
-            res.json(history);
-        });
-
-        this.app.post('/api/vision/analyze', this.upload.single('image'), async (req: any, res: Response) => {
-            try {
-                const base64 = req.file ? req.file.buffer.toString('base64') : req.body.image_base64;
-                const mime = req.file ? req.file.mimetype : (req.body.image_mime_type || 'image/jpeg');
-                if (!base64) { res.status(400).json({ error: "Missing image" }); return; }
-
-                const result = await this.geminiAdapter.analyzeImage(base64, mime, "Extraia os números do histórico de roleta. Retorne APENAS um JSON puro, sem markdown, no formato { \"total\": number, \"sequencia\": [number] }");
-                await this.signalRepository.saveSignal({
-                    type: 'vision_analysis',
-                    value: 'image_data',
-                    timestamp: Date.now(),
-                    analysis: result
-                });
-                res.status(200).json({ analysis: result });
-            } catch (error: any) {
-                res.status(500).json({ error: error.message });
-            }
-        });
+    if (!isPropitious) {
+      return res.json({
+        status: "LOCKED",
+        reason: "ALTA ENTROPIA: Mesa com aleatoriedade pura. Risco de ruína elevado.",
+        metrics: analysis.metrics
+      });
     }
 
-    public start(): void {
-        this.app.listen(this.port, this.host, () => console.log(`[SYS] Server ON: ${this.host}:${this.port}`));
-    }
-    public async stop(): Promise<void> { console.log('[SYS] Server Stopping...'); }
-}
+    // 4. Configuração de Sessão (Kelly Criterion aplicado à banca)
+    const recommendedStake = bankroll * analysis.bankroll;
+
+    res.json({
+      status: "ALLOWED",
+      message: "Mesa validada. Padrão detectado.",
+      sessionConfig: {
+        initialBankroll: bankroll,
+        unitStake: recommendedStake.toFixed(2),
+        maxDrawdown: (bankroll * 0.15).toFixed(2), // Stop Loss de 15%
+        targetProfit: (bankroll * 0.20).toFixed(2), // Stop Gain de 20%
+        strategy: analysis.signals[0]?.type || "MEAN_REVERSION"
+      },
+      analysis
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: "Falha no processamento do fluxo HFT." });
+  }
+});
+
+export default router;

@@ -53,3 +53,18 @@
 
 ---
 **RL.SYS CORE - Evoluindo de protótipo para inteligência de campo.**
+
+## 🧠 SPRINT 05: MOTOR QUANT ENTERPRISE
+- **Markov Chain:** Implementada matriz de transição de estados.
+- **Shannon Entropy:** Filtro de ruído para evitar entradas em mesas aleatórias.
+- **Z-Score Analysis:** Detecção de desvio da Distribuição Normal (Sigma 2.5+).
+- **Kelly Criterion:** Cálculo dinâmico de stake baseado em vantagem matemática (Edge).
+- **Lei dos Grandes Números:** Monitoramento de convergência de frequência.
+
+
+## 🛡️ SPRINT 06: GATEKEEPER & SESSION CONTROL
+- **Validação Go/No-Go:** Implementado bloqueio de sessão para Entropia de Shannon > 4.8.
+- **Dynamic Stake:** Integração do Critério de Kelly para definir o valor da unidade de aposta baseado na banca real.
+- **Risk Management:** Automação de Stop Loss (15%) e Take Profit (20%) por sessão.
+- **Real-time Feedback:** O Dashboard agora recebe o motivo técnico do bloqueio ou permissão.
+
