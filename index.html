@@ -1,13 +1,86 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL.SYS CORE v1.7</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: monospace; }
+        .card { background: #1e293b; border: 1px solid #334155; }
+        .number-badge { min-width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-weight: bold; background: #334155; border: 1px solid #475569; }
+    </style>
+</head>
+<body class="p-4">
+    <div class="max-w-5xl mx-auto">
+        <header class="mb-6"><h1 class="text-2xl font-bold text-blue-400">RL.SYS CORE <span class="text-xs text-slate-500">v1.7</span></h1></header>
+        <main class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div class="lg:col-span-1">
+                <div class="card p-4 rounded-xl">
+                    <input type="file" id="imageInput" class="hidden" accept="image/*">
+                    <label for="imageInput" class="block border-2 border-dashed border-slate-600 p-6 text-center cursor-pointer">Upload Histórico</label>
+                    <button id="btnAnalyze" class="w-full mt-4 bg-blue-600 p-3 rounded font-bold">ESCANEAR AGORA</button>
+                </div>
+            </div>
+            <div class="lg:col-span-3">
+                <div id="telemetria" class="card p-4 rounded-xl hidden">
+                    <div id="counter" class="mb-2 text-blue-400 font-bold text-lg">0 números</div>
+                    <div id="numberGrid" class="flex flex-wrap gap-2 p-4 bg-black rounded mb-4 overflow-y-auto max-h-64"></div>
+                    <pre id="rawOutput" class="text-[10px] text-green-500 overflow-auto max-h-40 bg-slate-900 p-2 rounded"></pre>
+                </div>
+            </div>
+        </main>
+    </div>
 
+    <script>
+        const btn = document.getElementById('btnAnalyze');
+        const input = document.getElementById('imageInput');
+        const rawOut = document.getElementById('rawOutput');
+        const numGrid = document.getElementById('numberGrid');
+        const counter = document.getElementById('counter');
+
+        btn.onclick = async () => {
+            if(!input.files[0]) return;
+            const file = input.files[0];
+            btn.innerText = "CONECTANDO API...";
+            
+            const formData = new FormData();
+            formData.append('image', file);
+            // Passamos o mimeType limpo explicitamente
+            formData.append('mimeType', file.type || 'image/jpeg');
+
+            try {
+                const res = await fetch('/api/vision/analyze', { method: 'POST', body: formData });
+                const result = await res.json();
+                
+                let rawContent = result.analysis || result;
+                
+                if (typeof rawContent === 'string') {
+                    // Limpeza de Markdown do Gemini
+                    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        rawContent = JSON.parse(jsonMatch[0]);
+                    }
+                }
+
+                rawOut.innerText = JSON.stringify(rawContent, null, 2);
+                document.getElementById('telemetria').classList.remove('hidden');
+
+                const seq = rawContent.sequencia || [];
+                counter.innerText = `${seq.length} números detectados`;
+                numGrid.innerHTML = '';
+                seq.forEach(n => {
+                    const b = document.createElement('div');
+                    b.className = 'number-badge';
+                    b.innerText = n;
+                    numGrid.appendChild(b);
+                });
+            } catch (err) {
+                rawOut.innerText = "ERRO API: " + err.message;
+            } finally {
+                btn.innerText = "ESCANEAR AGORA";
+            }
+        };
+    </script>
+</body>
+</html>
